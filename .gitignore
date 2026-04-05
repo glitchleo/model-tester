@@ -1,0 +1,32 @@
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# IDE / notebook noise
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+
+# Keep project structure, but ignore model artifacts
+models/*/weights/*
+!models/*/weights/.gitkeep
+
+models/*/checkpoints/*
+!models/*/checkpoints/.gitkeep
+
+# Keep dataset folders, but ignore dataset files
+data/datasets/*
+!data/datasets/README.md
+!data/datasets/.gitkeep
+
+data/samples/*
+!data/samples/README.md
+!data/samples/.gitkeep
+
+# Keep output folder, but ignore generated results
+outputs/*
+!outputs/README.md
+!outputs/.gitkeep
