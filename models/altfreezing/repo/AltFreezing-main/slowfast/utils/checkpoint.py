@@ -18,6 +18,13 @@ from slowfast.utils.c2_model_loading import get_name_convert_func
 logger = logging.get_logger(__name__)
 
 
+def torch_load_compat(path, map_location=None):
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=map_location)
+
+
 def make_checkpoint_dir(path_to_job):
     """
     Creates the checkpoint directory (if not present already).
@@ -308,7 +315,7 @@ def load_checkpoint(
     else:
         # Load the checkpoint on CPU to avoid GPU mem spike.
         with PathManager.open(path_to_checkpoint, "rb") as f:
-            checkpoint = torch.load(f, map_location="cpu")
+            checkpoint = torch_load_compat(f, map_location="cpu")
         model_state_dict_3d = (
             model.module.state_dict() if data_parallel else model.state_dict()
         )
@@ -517,7 +524,7 @@ def load_train_checkpoint(cfg, model, optimizer):
 
 def load_backbone(model,file):
     current_state=model.state_dict()
-    checkpoint=torch.load(file)
+    checkpoint=torch_load_compat(file)
     
     for key in checkpoint:
         if key in current_state:
@@ -526,5 +533,3 @@ def load_backbone(model,file):
     model.load_state_dict(current_state)
 
     return model
-
-

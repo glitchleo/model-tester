@@ -8,6 +8,13 @@ from torch.utils.data import DataLoader
 from .basenet import MobileNet_GDConv
 
 
+def torch_load_compat(path, map_location=None):
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=map_location)
+
+
 def get_device(gpu_id):
     if gpu_id > -1:
         return torch.device(f"cuda:{str(gpu_id)}")
@@ -18,7 +25,7 @@ def get_device(gpu_id):
 def load_model(file):
     model = MobileNet_GDConv(136)
     if file is not None:
-        model.load_state_dict(torch.load(file, map_location="cpu"))
+        model.load_state_dict(torch_load_compat(file, map_location="cpu"))
     else:
         url = "https://github.com/yinglinzheng/face_weights/releases/download/v1/mobilenet_224_model_best_gdconv_external.pth"
         model.load_state_dict(torch.utils.model_zoo.load_url(url,model_dir='./auxillary'))

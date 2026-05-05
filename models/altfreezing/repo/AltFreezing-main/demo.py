@@ -24,6 +24,14 @@ cfg_path = "i3d_ori.yaml"
 ckpt_path = "checkpoints/model.pth"
 optimal_threshold = 0.04
 
+
+def torch_load_compat(path, map_location=None):
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=map_location)
+
+
 if __name__ == "__main__":
     cfg.init_with_yaml()
     cfg.update_with_yaml(cfg_path)
@@ -44,7 +52,7 @@ if __name__ == "__main__":
     cache_file = f"{video_path}_{max_frame}.pth"
 
     if os.path.exists(cache_file):
-        detect_res, all_lm68 = torch.load(cache_file)
+        detect_res, all_lm68 = torch_load_compat(cache_file)
         frames = grab_all_frames(video_path, max_size=max_frame, cvt=True)
         print("detection result loaded from cache")
     else:

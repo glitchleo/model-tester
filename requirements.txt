@@ -1,0 +1,31 @@
+# Runtime dependencies verified in this workspace on Python 3.11.
+# Install PyTorch first for your machine, then install this file:
+#   python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#   python -m pip install -r requirements.txt
+albumentations==2.0.8
+contexttimer==0.3.3
+efficientnet-pytorch==0.7.1
+einops==0.8.2
+ffmpeg-python==0.2.0
+filterpy==1.4.5
+fvcore==0.1.5.post20221221
+imgaug==0.4.0
+lmdb==2.2.0
+numpy==2.4.3
+opencv-python==4.13.0.92
+opencv-transforms==0.0.6
+pandas==3.0.2
+pillow==12.1.1
+prettytable==3.17.0
+PyTurboJPEG==2.2.0
+PyYAML==6.0.3
+retinaface-pytorch==0.0.7
+scikit-image==0.26.0
+scikit-learn==1.8.0
+scipy==1.17.1
+simplejson==3.20.2
+tabulate==0.10.0
+tensorboardX==2.6.5
+termcolor==3.3.0
+tqdm==4.67.3
+yacs==0.1.8

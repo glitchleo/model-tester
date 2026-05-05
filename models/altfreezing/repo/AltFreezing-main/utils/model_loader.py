@@ -15,6 +15,14 @@ import torch.distributed as dist
 import copy
 from .torch_save import torch_save
 
+
+def torch_load_compat(path, map_location=None):
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=map_location)
+
+
 def add_loader(target, name,max_to_keep=2):
 
     def get_rank(self):
@@ -44,7 +52,7 @@ def add_loader(target, name,max_to_keep=2):
             return False, -1
         logger.debug("Loading model: '%s'", fullpath)
         try:
-            saved_state_dict = torch.load(fullpath, map_location='cpu')
+            saved_state_dict = torch_load_compat(fullpath, map_location='cpu')
             self.load_state_dict(saved_state_dict)
             logger.info(" consume training from {}".format(fullpath))
         except ValueError as err:

@@ -11,6 +11,13 @@ env/
 Thumbs.db
 
 # Keep project structure, but ignore model artifacts
+models/*/.torch-cache/
+models/*/repo/**/__pycache__/
+
+auxillary/*.pth
+!auxillary/.gitkeep
+!auxillary/README.md
+
 models/*/weights/*
 !models/*/weights/.gitkeep
 

@@ -9,6 +9,13 @@ import torch.nn.functional as F
 import torchvision.models._utils as _utils
 
 
+def torch_load_compat(path, map_location=None):
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=map_location)
+
+
 def conv_bn(inp, oup, stride=1, leaky=0):
     return nn.Sequential(
         nn.Conv2d(inp, oup, 3, stride, 1, bias=False),
@@ -440,12 +447,12 @@ def load_model(model, pretrained_path, load_to_cpu):
             url = "https://github.com/yinglinzheng/face_weights/releases/download/v1/mobilenet0.25_Final.pth"
             pretrained_dict = torch.utils.model_zoo.load_url(url,model_dir='./auxillary')
         else:
-            pretrained_dict = torch.load(
+            pretrained_dict = torch_load_compat(
                 pretrained_path, map_location=lambda storage, loc: storage
             )
     else:
         device = torch.cuda.current_device()
-        pretrained_dict = torch.load(
+        pretrained_dict = torch_load_compat(
             pretrained_path, map_location=lambda storage, loc: storage.cuda(device)
         )
     if "state_dict" in pretrained_dict.keys():

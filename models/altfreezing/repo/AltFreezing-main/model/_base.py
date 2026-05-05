@@ -28,6 +28,13 @@ from typing import Type
 #    raise ImportError("Model v2 are need apex and inplaceabn as a prerequsite")
 
 
+def torch_load_compat(path, map_location=None):
+    try:
+        return torch.load(path, map_location=map_location, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=map_location)
+
+
 class ModelBase(nn.Module):
     """Base class that all models should inherit from"""
 
@@ -68,7 +75,7 @@ class ModelBase(nn.Module):
 
         logger.debug("Loading model: '%s'", fullpath)
         try:
-            saved_state_dict = torch.load(fullpath, map_location="cpu")
+            saved_state_dict = torch_load_compat(fullpath, map_location="cpu")
             if "state_dict" in saved_state_dict.keys():
                 saved_state_dict = saved_state_dict["state_dict"]
             # print(saved_state_dict.keys())
