@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import subprocess
 import sys
+import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +57,13 @@ IMPORT_GROUPS = {
         ("retinaface", "retinaface-pytorch"),
     ],
 }
+MODEL_IMPORT_GROUPS = {
+    "all": list(IMPORT_GROUPS),
+    "altfreezing": ["core runtime", "AltFreezing runtime"],
+    "f3net": ["core runtime"],
+    "selfblendedimages": ["core runtime", "SelfBlendedImages runtime"],
+    "ucf": ["core runtime"],
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,9 +75,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--model",
-        choices=["all", "altfreezing", "f3net", "selfblendedimages"],
+        choices=["all", "altfreezing", "f3net", "selfblendedimages", "ucf"],
         default="all",
-        help="Model to use for --smoke. Defaults to all.",
+        help="Model to validate and use for --smoke. Defaults to all.",
     )
     return parser.parse_args()
 
@@ -153,9 +161,10 @@ def check_python() -> list[Check]:
     return checks
 
 
-def check_imports() -> list[Check]:
+def check_imports(model: str) -> list[Check]:
     checks: list[Check] = []
-    for group_name, modules in IMPORT_GROUPS.items():
+    for group_name in MODEL_IMPORT_GROUPS[model]:
+        modules = IMPORT_GROUPS[group_name]
         missing = [package for module, package in modules if not module_available(module)]
         if missing:
             checks.append(
@@ -171,7 +180,7 @@ def check_imports() -> list[Check]:
     return checks
 
 
-def check_torch() -> list[Check]:
+def check_torch(model: str) -> list[Check]:
     if not module_available("torch"):
         return []
 
@@ -188,23 +197,31 @@ def check_torch() -> list[Check]:
     if torch.cuda.is_available():
         device = torch.cuda.get_device_name(0)
         checks.append(Check("OK", "CUDA", f"CUDA is available: {device}."))
-    else:
+    elif model in {"all", "altfreezing"}:
+        detail = (
+            "CUDA is not available. SelfBlendedImages, F3Net, and UCF can run on CPU, "
+            "but AltFreezing needs CUDA here."
+        )
         checks.append(
             Check(
                 "WARN",
                 "CUDA",
-                "CUDA is not available. SelfBlendedImages can run on CPU, but AltFreezing needs CUDA here.",
+                detail,
                 "Install a CUDA-enabled PyTorch build and NVIDIA driver if you need AltFreezing.",
             )
         )
+    else:
+        checks.append(Check("OK", "CUDA", f"CUDA is not available; {model} can run on CPU."))
     return checks
 
 
-def check_repos() -> list[Check]:
+def check_repos(model: str) -> list[Check]:
     markers = [
-        ("AltFreezing repo", ROOT / "models" / "altfreezing" / "repo", "demo.py"),
-        ("F3Net repo", ROOT / "models" / "f3net" / "repo", "models.py"),
+        ("altfreezing", "AltFreezing repo", ROOT / "models" / "altfreezing" / "repo", "demo.py"),
+        ("f3net", "F3Net repo", ROOT / "models" / "f3net" / "repo", "models.py"),
+        ("ucf", "UCF shared Xception source", ROOT / "models" / "f3net" / "repo", "xception.py"),
         (
+            "selfblendedimages",
             "SelfBlendedImages repo",
             ROOT / "models" / "selfblendedimages" / "repo",
             "src/inference/model.py",
@@ -212,7 +229,9 @@ def check_repos() -> list[Check]:
     ]
 
     checks: list[Check] = []
-    for area, repo_dir, marker in markers:
+    for model_name, area, repo_dir, marker in markers:
+        if model not in {"all", model_name}:
+            continue
         repo_root = find_repo_root(repo_dir, marker)
         if repo_root is None:
             checks.append(
@@ -228,86 +247,103 @@ def check_repos() -> list[Check]:
     return checks
 
 
-def check_assets() -> list[Check]:
+def check_assets(model: str) -> list[Check]:
     checks: list[Check] = []
 
-    alt_checkpoints = [
-        path
-        for path in (ROOT / "models" / "altfreezing" / "checkpoints").glob("*.pth")
-        if path.stat().st_size > 1024 * 1024
-    ]
-    if alt_checkpoints:
-        checks.append(Check("OK", "AltFreezing checkpoint", f"Found {alt_checkpoints[0].name}."))
-    else:
-        checks.append(
-            Check(
-                "FAIL",
-                "AltFreezing checkpoint",
-                "No usable .pth checkpoint found in models/altfreezing/checkpoints.",
-                "Put model.pth or another AltFreezing checkpoint in that folder.",
+    if model in {"all", "altfreezing"}:
+        alt_checkpoints = [
+            path
+            for path in (ROOT / "models" / "altfreezing" / "checkpoints").glob("*.pth")
+            if path.stat().st_size > 1024 * 1024
+        ]
+        if alt_checkpoints:
+            checks.append(Check("OK", "AltFreezing checkpoint", f"Found {alt_checkpoints[0].name}."))
+        else:
+            checks.append(
+                Check(
+                    "FAIL",
+                    "AltFreezing checkpoint",
+                    "No usable .pth checkpoint found in models/altfreezing/checkpoints.",
+                    "Put model.pth or another AltFreezing checkpoint in that folder.",
+                )
             )
-        )
 
-    aux_dir = ROOT / "auxillary"
-    aux_files = [
-        aux_dir / "mobilenet0.25_Final.pth",
-        aux_dir / "mobilenet_224_model_best_gdconv_external.pth",
-    ]
-    missing_aux = [path.name for path in aux_files if not path.is_file()]
-    if missing_aux:
-        checks.append(
-            Check(
-                "FAIL",
-                "AltFreezing auxiliary weights",
-                "Missing: " + ", ".join(missing_aux),
-                "Restore the face detection auxiliary weights in auxillary/.",
+        aux_dir = ROOT / "auxillary"
+        aux_files = [
+            aux_dir / "mobilenet0.25_Final.pth",
+            aux_dir / "mobilenet_224_model_best_gdconv_external.pth",
+        ]
+        missing_aux = [path.name for path in aux_files if not path.is_file()]
+        if missing_aux:
+            checks.append(
+                Check(
+                    "FAIL",
+                    "AltFreezing auxiliary weights",
+                    "Missing: " + ", ".join(missing_aux),
+                    "Restore the face detection auxiliary weights in auxillary/.",
+                )
             )
-        )
-    else:
-        checks.append(Check("OK", "AltFreezing auxiliary weights", "Both auxiliary weights are present."))
+        else:
+            checks.append(Check("OK", "AltFreezing auxiliary weights", "Both auxiliary weights are present."))
 
-    f3net_weights = ROOT / "models" / "f3net" / "weights"
-    if (f3net_weights / F3NET_BACKBONE).is_file():
-        checks.append(Check("OK", "F3Net backbone", f"Found {F3NET_BACKBONE}."))
-    else:
-        checks.append(
-            Check(
-                "FAIL",
-                "F3Net backbone",
-                f"Missing {F3NET_BACKBONE}.",
-                "Put the Xception backbone in models/f3net/weights/.",
+    if model in {"all", "f3net"}:
+        f3net_weights = ROOT / "models" / "f3net" / "weights"
+        if (f3net_weights / F3NET_BACKBONE).is_file():
+            checks.append(Check("OK", "F3Net Xception backbone", f"Found {F3NET_BACKBONE}."))
+        else:
+            checks.append(
+                Check(
+                    "WARN",
+                    "F3Net Xception backbone",
+                    f"Missing {F3NET_BACKBONE}.",
+                    "Put the Xception backbone in models/f3net/weights/ if you use upstream-style checkpoints.",
+                )
             )
-        )
 
-    detector_candidates = [
-        path
-        for path in f3net_weights.glob("*.pth")
-        if path.name != F3NET_BACKBONE and path.stat().st_size > 1024 * 1024
-    ]
-    if detector_candidates:
-        checks.append(Check("OK", "F3Net detector checkpoint", f"Found {detector_candidates[0].name}."))
-    else:
-        checks.append(
-            Check(
-                "WARN",
-                "F3Net detector checkpoint",
-                "Only the Xception backbone is present; F3Net scoring will be reported as unavailable.",
-                "Add a trained F3Net detector checkpoint to models/f3net/weights/ when you want F3Net results.",
+        detector_candidates = [
+            path
+            for path in f3net_weights.glob("*.pth")
+            if path.name != F3NET_BACKBONE and path.stat().st_size > 1024 * 1024
+        ]
+        if detector_candidates:
+            checks.append(Check("OK", "F3Net detector checkpoint", f"Found {detector_candidates[0].name}."))
+        else:
+            checks.append(
+                Check(
+                    "FAIL",
+                    "F3Net detector checkpoint",
+                    "No trained F3Net detector checkpoint was found.",
+                    "Add a trained F3Net detector checkpoint to models/f3net/weights/.",
+                )
             )
-        )
 
-    sbi_weights = ROOT / "models" / "selfblendedimages" / "weights"
-    if selfblended_weight_available(sbi_weights):
-        checks.append(Check("OK", "SelfBlendedImages weights", "Found a usable checkpoint archive or extracted checkpoint."))
-    else:
-        checks.append(
-            Check(
-                "FAIL",
-                "SelfBlendedImages weights",
-                "No usable FFc23 checkpoint was found.",
-                "Put a .tar checkpoint in models/selfblendedimages/weights/ or restore FFc23_extracted/.",
+    if model in {"all", "ucf"}:
+        ucf_checkpoint = ROOT / "models" / "ucf" / "ucf_best.pth"
+        if ucf_checkpoint.is_file() and ucf_checkpoint.stat().st_size > 1024 * 1024:
+            checks.append(Check("OK", "UCF detector checkpoint", f"Found {ucf_checkpoint.name}."))
+        else:
+            checks.append(
+                Check(
+                    "FAIL",
+                    "UCF detector checkpoint",
+                    "No usable UCF checkpoint was found.",
+                    "Put ucf_best.pth in models/ucf/ or pass --ucf-checkpoint to score_image.py.",
+                )
             )
-        )
+
+    if model in {"all", "selfblendedimages"}:
+        sbi_weights = ROOT / "models" / "selfblendedimages" / "weights"
+        if selfblended_weight_available(sbi_weights):
+            checks.append(Check("OK", "SelfBlendedImages weights", "Found a usable checkpoint archive or extracted checkpoint."))
+        else:
+            checks.append(
+                Check(
+                    "FAIL",
+                    "SelfBlendedImages weights",
+                    "No usable FFc23 checkpoint was found.",
+                    "Put a .tar checkpoint in models/selfblendedimages/weights/ or restore FFc23_extracted/.",
+                )
+            )
 
     sample_images = [
         path
@@ -358,12 +394,30 @@ def print_checks(checks: list[Check]) -> None:
         print(f"{check.status.ljust(status_width)}  {check.area.ljust(area_width)}  {detail}")
 
 
+def synthetic_smoke_image() -> Path:
+    sample = Path(tempfile.gettempdir()) / "model_tester_smoke.png"
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (256, 256), (112, 128, 144))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((24, 24, 232, 232), outline=(224, 224, 224), width=4)
+    draw.line((24, 232, 232, 24), fill=(64, 96, 160), width=5)
+    image.save(sample)
+    return sample
+
+
+def first_sample_image() -> Path | None:
+    for suffix in ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.webp"):
+        sample = next((ROOT / "data" / "samples").glob(suffix), None)
+        if sample is not None:
+            return sample
+    return None
+
+
 def run_smoke(model: str) -> int:
-    sample = ROOT / "data" / "samples" / "1.png"
-    if not sample.is_file():
-        print()
-        print(f"Smoke test skipped: sample image not found at {sample}")
-        return 1
+    sample = first_sample_image()
+    if sample is None:
+        sample = synthetic_smoke_image()
 
     command = [sys.executable, str(ROOT / "score_image.py"), str(sample), "--model", model]
     print()
@@ -384,10 +438,10 @@ def main() -> int:
     args = parse_args()
     checks = []
     checks.extend(check_python())
-    checks.extend(check_imports())
-    checks.extend(check_torch())
-    checks.extend(check_repos())
-    checks.extend(check_assets())
+    checks.extend(check_imports(args.model))
+    checks.extend(check_torch(args.model))
+    checks.extend(check_repos(args.model))
+    checks.extend(check_assets(args.model))
     print_checks(checks)
     sys.stdout.flush()
 

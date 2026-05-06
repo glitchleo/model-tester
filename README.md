@@ -40,17 +40,19 @@ model-tester/
 |   |   `-- weights/
 |   |       `-- FFc23_extracted/
 |   |       OR FFc23_repacked.tar
-|   `-- f3net/
-|       `-- weights/
-|           |-- xception-b5690688.pth
-|           `-- your_trained_f3net_detector.pth
+|   |-- f3net/
+|   |   `-- weights/
+|   |       |-- xception-b5690688.pth
+|   |       `-- f3net_best.pth
+|   `-- ucf/
+|       `-- ucf_best.pth
 |-- data/
 |   `-- samples/
 |       `-- your_test_video_or_image.mp4
 `-- outputs/
 ```
 
-Required for the current default workflow:
+Required for the previous multi-model workflow:
 
 - AltFreezing checkpoint: `models/altfreezing/checkpoints/model.pth`
 - AltFreezing auxiliary weights:
@@ -58,12 +60,18 @@ Required for the current default workflow:
   - `auxillary/mobilenet_224_model_best_gdconv_external.pth`
 - SelfBlendedImages checkpoint: either `models/selfblendedimages/weights/FFc23_repacked.tar` or the extracted folder `models/selfblendedimages/weights/FFc23_extracted/`
 
-Optional:
+F3Net:
 
 - F3Net backbone: `models/f3net/weights/xception-b5690688.pth`
-- F3Net trained detector checkpoint: any additional `.pth` in `models/f3net/weights/`
+- F3Net detector checkpoint: `models/f3net/weights/f3net_best.pth`, or another detector `.pth` passed with `--f3net-checkpoint`
 
-F3Net is not part of the default `both` run because the current local setup only has the Xception backbone. Add a trained detector checkpoint before expecting F3Net scores.
+The included `f3net_best.pth` is a FAD-only 256px detector checkpoint. The runner detects that format and uses its `backbone.*` classifier weights directly. The Xception backbone file is still used for upstream-style F3Net checkpoints that need ImageNet Xception initialization.
+
+UCF:
+
+- UCF detector checkpoint: `models/ucf/ucf_best.pth`, or another checkpoint passed with `--ucf-checkpoint`
+
+UCF uses the DeepfakeBench Xception-style backbone at 256px resolution. The local wrapper reuses the tracked F3Net Xception source for the compatible backbone implementation.
 
 ## Verify Setup
 
@@ -77,7 +85,15 @@ Expected status:
 
 - `AltFreezing`: OK when CUDA, `model.pth`, and both auxiliary weights are present.
 - `SelfBlendedImages`: OK when its FF-c23 checkpoint exists.
-- `F3Net`: WARN until a trained detector checkpoint is added.
+- `F3Net`: OK when `xception-b5690688.pth` and `f3net_best.pth` exist.
+- `UCF`: OK when `models/ucf/ucf_best.pth` exists.
+
+Run a F3Net-only or UCF-only setup check and smoke test:
+
+```powershell
+python .\check_setup.py --model f3net --smoke
+python .\check_setup.py --model ucf --smoke
+```
 
 Run a quick image smoke test:
 
@@ -93,11 +109,26 @@ python .\score_image.py .\data\samples\your_video.mp4 --model altfreezing --vide
 
 ## Scoring Commands
 
-Default video scoring runs the two ready models: AltFreezing and SelfBlendedImages.
+Default scoring auto-detects available local models. In this workspace that currently means F3Net and UCF, because AltFreezing and SelfBlendedImages only have placeholder weight folders.
 
 ```powershell
-python .\score_image.py .\data\samples\your_video.mp4 --video-frames 48
+python .\score_image.py .\data\samples\your_image.jpg --json
+python .\score_image.py .\data\samples\your_image.jpg --model available --json
+python .\score_image.py .\data\samples\your_video.mp4 --json
 ```
+
+Use `--model all` only when you intentionally want to try every configured model and see which ones are missing weights or dependencies.
+
+For videos, the default is a quick 8-frame test across every available model. Increase the frame budget when you want more coverage:
+
+```powershell
+python .\score_image.py .\data\samples\your_video.mp4 --video-preset quick --json
+python .\score_image.py .\data\samples\your_video.mp4 --video-preset balanced --json
+python .\score_image.py .\data\samples\your_video.mp4 --video-preset thorough --json
+python .\score_image.py .\data\samples\your_video.mp4 --video-frames 48 --json
+```
+
+The final report includes the models that ran, any locally unavailable models that were skipped, the combined score, video metadata, peak sampled frames, and a short explanation of what the score means.
 
 SelfBlendedImages only, adaptive frame scan:
 
@@ -124,12 +155,23 @@ python .\score_image.py .\data\samples\your_image.jpg --model selfblendedimages
 python .\score_image.py .\data\samples\your_image.jpg --model altfreezing
 ```
 
-F3Net, only after adding a trained detector checkpoint:
+F3Net image/video scoring:
 
 ```powershell
-python .\score_image.py .\data\samples\your_image.jpg --model f3net --f3net-checkpoint .\models\f3net\weights\your_f3net_detector.pth
-python .\score_image.py .\data\samples\your_video.mp4 --model f3net --f3net-checkpoint .\models\f3net\weights\your_f3net_detector.pth --video-frames 32
+python .\score_image.py .\data\samples\your_image.jpg --model f3net --json
+python .\score_image.py .\data\samples\your_video.mp4 --model f3net --video-frames 32 --json
 ```
+
+If more than one F3Net detector checkpoint is present, select one explicitly with `--f3net-checkpoint`.
+
+UCF image/video scoring:
+
+```powershell
+python .\score_image.py .\data\samples\your_image.jpg --model ucf --json
+python .\score_image.py .\data\samples\your_video.mp4 --model ucf --video-frames 32 --json
+```
+
+If you want a non-default UCF checkpoint, pass it with `--ucf-checkpoint`.
 
 ## Output Format
 
@@ -182,6 +224,7 @@ AltFreezing is already video-based. For videos, `--video-frames` is passed as Al
 - `models/altfreezing/`: wrapper plus upstream `ZhendongWang6/AltFreezing` source in `repo/`.
 - `models/selfblendedimages/`: wrapper plus upstream `mapooon/SelfBlendedImages` source in `repo/`.
 - `models/f3net/`: wrapper plus upstream `yyk-wew/F3Net` source in `repo/`.
+- `models/ucf/`: wrapper plus local UCF checkpoint; uses the tracked F3Net Xception source.
 - `data/samples/`: local test images/videos, ignored by git.
 - `outputs/`: generated predictions/logs, ignored by git.
 
@@ -198,6 +241,7 @@ Make sure no large local artifacts are staged:
 
 - no files under `models/*/weights/`
 - no files under `models/*/checkpoints/`
+- no `.pth` or `.pt` files directly under `models/*/`
 - no `.pth` files under `auxillary/`
 - no sample videos/images under `data/samples/`
 - no generated files under `outputs/`

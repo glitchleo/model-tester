@@ -5,36 +5,50 @@ import json
 import re
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
+REPO_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
+RUNNER_PYTHON = REPO_PYTHON if REPO_PYTHON.is_file() else Path(sys.executable)
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 VIDEO_SUFFIXES = {".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"}
-MODEL_NAMES = ["altfreezing", "f3net", "selfblendedimages"]
-READY_MODEL_NAMES = ["altfreezing", "selfblendedimages"]
+MODEL_NAMES = ["altfreezing", "f3net", "selfblendedimages", "ucf"]
+MIN_WEIGHT_BYTES = 1024 * 1024
+VIDEO_PRESETS = {
+    "quick": 8,
+    "balanced": 32,
+    "thorough": 96,
+}
 MODEL_LABELS = {
     "altfreezing": "AltFreezing",
     "f3net": "F3Net",
     "selfblendedimages": "SelfBlendedImages",
+    "ucf": "UCF",
 }
 RUNNERS = {
     "image": {
         "altfreezing": ROOT / "models" / "altfreezing" / "run_image.py",
         "f3net": ROOT / "models" / "f3net" / "run_image.py",
         "selfblendedimages": ROOT / "models" / "selfblendedimages" / "run_image.py",
+        "ucf": ROOT / "models" / "ucf" / "run_image.py",
     },
     "video": {
         "altfreezing": ROOT / "models" / "altfreezing" / "run_video.py",
         "f3net": ROOT / "models" / "f3net" / "run_video.py",
         "selfblendedimages": ROOT / "models" / "selfblendedimages" / "run_video.py",
+        "ucf": ROOT / "models" / "ucf" / "run_video.py",
     },
 }
 SUCCESS_NOTES = {
     ("image", "altfreezing"): "single image duplicated into a short video clip because the original model is video-based",
+    ("image", "f3net"): "image resized and scored with the F3Net FAD detector",
+    ("image", "ucf"): "image resized and scored with the UCF shared-feature detector",
     ("video", "altfreezing"): "native video model using temporal face-track clips",
     ("video", "f3net"): "video sampled into frames and averaged because F3Net is image-based",
     ("video", "selfblendedimages"): "video sampled into frames and averaged because SelfBlendedImages is image-based",
+    ("video", "ucf"): "video sampled into frames and averaged because UCF is image-based",
 }
 SCORE_PATTERN = re.compile(r"^SCORE:(?P<value>[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)$", re.MULTILINE)
 UNAVAILABLE_PATTERN = re.compile(r"^UNAVAILABLE:(?P<reason>.+)$", re.MULTILINE)
@@ -48,9 +62,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("media", type=Path, help="Path to the input image or video.")
     parser.add_argument(
         "--model",
-        choices=["both", "all", *MODEL_NAMES],
-        default="both",
-        help="Which model(s) to run. Defaults to both ready models: AltFreezing and SelfBlendedImages.",
+        choices=["available", "both", "all", *MODEL_NAMES],
+        default="available",
+        help=(
+            "Which model(s) to run. Defaults to all models with local assets available. "
+            "Use all to try every configured model, including unavailable ones."
+        ),
     )
     parser.add_argument(
         "--altfreezing-checkpoint",
@@ -63,6 +80,11 @@ def parse_args() -> argparse.Namespace:
         help="Optional override for the F3Net detector checkpoint.",
     )
     parser.add_argument(
+        "--ucf-checkpoint",
+        type=Path,
+        help="Optional override for the UCF detector checkpoint.",
+    )
+    parser.add_argument(
         "--selfblendedimages-weight",
         type=Path,
         help="Optional override for the SelfBlendedImages weight file.",
@@ -72,8 +94,14 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help=(
             "Optional frame count for video scoring. For AltFreezing this is --max-frame; "
-            "for F3Net this is uniform sampled frames; for SelfBlendedImages this is the adaptive/uniform frame limit."
+            "for F3Net and UCF this is uniform sampled frames; for SelfBlendedImages this is the adaptive/uniform frame limit."
         ),
+    )
+    parser.add_argument(
+        "--video-preset",
+        choices=list(VIDEO_PRESETS),
+        default="quick",
+        help="Video test budget used when --video-frames is not provided. Defaults to quick.",
     )
     parser.add_argument(
         "--video-frame-mode",
@@ -154,26 +182,174 @@ def infer_media_kind(media_path: Path) -> str | None:
     return None
 
 
-def selected_model_names(selection: str) -> list[str]:
-    if selection == "both":
-        return READY_MODEL_NAMES
+def large_file(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > MIN_WEIGHT_BYTES
+
+
+def repo_has_marker(repo_dir: Path, marker: str) -> bool:
+    if not repo_dir.exists():
+        return False
+    candidates = [repo_dir]
+    candidates.extend(sorted(path for path in repo_dir.iterdir() if path.is_dir()))
+    return any((candidate / marker).exists() for candidate in candidates)
+
+
+def torch_cuda_available() -> bool:
+    try:
+        import torch
+    except Exception:
+        return False
+    return bool(torch.cuda.is_available())
+
+
+def selfblended_weight_available(weights_dir: Path, provided: Path | None) -> bool:
+    if provided:
+        return provided.resolve().is_file()
+
+    for candidate in sorted(weights_dir.glob("*.tar")):
+        if not large_file(candidate):
+            continue
+        if not zipfile.is_zipfile(candidate):
+            continue
+        try:
+            with zipfile.ZipFile(candidate) as archive:
+                if any(name.endswith("data.pkl") for name in archive.namelist()):
+                    return True
+        except zipfile.BadZipFile:
+            continue
+
+    extracted = weights_dir / "FFc23_extracted"
+    return (extracted / "archive" / "data.pkl").is_file()
+
+
+def model_unavailable_reason(model_name: str, media_kind: str, args: argparse.Namespace) -> str | None:
+    runner = RUNNERS.get(media_kind, {}).get(model_name)
+    if runner is None or not runner.is_file():
+        return f"missing {media_kind} runner"
+
+    if model_name == "altfreezing":
+        checkpoint_ok = (
+            args.altfreezing_checkpoint.resolve().is_file()
+            if args.altfreezing_checkpoint
+            else any(large_file(path) for path in (ROOT / "models" / "altfreezing" / "checkpoints").glob("*.pth"))
+        )
+        aux_dir = ROOT / "auxillary"
+        aux_ok = all(
+            (aux_dir / name).is_file()
+            for name in ("mobilenet0.25_Final.pth", "mobilenet_224_model_best_gdconv_external.pth")
+        )
+        missing = []
+        if not checkpoint_ok:
+            missing.append("checkpoint in models/altfreezing/checkpoints")
+        if not aux_ok:
+            missing.append("auxiliary face weights in auxillary")
+        if not torch_cuda_available():
+            missing.append("CUDA runtime")
+        if not repo_has_marker(ROOT / "models" / "altfreezing" / "repo", "demo.py"):
+            missing.append("AltFreezing source repo")
+        return None if not missing else "missing " + ", ".join(missing)
+
+    if model_name == "f3net":
+        weights_dir = ROOT / "models" / "f3net" / "weights"
+        backbone_ok = (weights_dir / "xception-b5690688.pth").is_file()
+        detector_ok = (
+            args.f3net_checkpoint.resolve().is_file()
+            if args.f3net_checkpoint
+            else any(
+                large_file(path)
+                for path in weights_dir.glob("*.pth")
+                if path.name != "xception-b5690688.pth"
+            )
+        )
+        missing = []
+        if not backbone_ok:
+            missing.append("Xception backbone")
+        if not detector_ok:
+            missing.append("F3Net detector checkpoint")
+        if not repo_has_marker(ROOT / "models" / "f3net" / "repo", "models.py"):
+            missing.append("F3Net source repo")
+        return None if not missing else "missing " + ", ".join(missing)
+
+    if model_name == "selfblendedimages":
+        weight_ok = selfblended_weight_available(
+            ROOT / "models" / "selfblendedimages" / "weights",
+            args.selfblendedimages_weight,
+        )
+        repo_ok = repo_has_marker(
+            ROOT / "models" / "selfblendedimages" / "repo",
+            "src/inference/model.py",
+        )
+        missing = []
+        if not weight_ok:
+            missing.append("SelfBlendedImages FFc23 checkpoint")
+        if not repo_ok:
+            missing.append("SelfBlendedImages source repo")
+        return None if not missing else "missing " + ", ".join(missing)
+
+    if model_name == "ucf":
+        checkpoint = args.ucf_checkpoint.resolve() if args.ucf_checkpoint else ROOT / "models" / "ucf" / "ucf_best.pth"
+        checkpoint_ok = large_file(checkpoint)
+        repo_ok = repo_has_marker(ROOT / "models" / "f3net" / "repo", "xception.py")
+        missing = []
+        if not checkpoint_ok:
+            missing.append("UCF checkpoint")
+        if not repo_ok:
+            missing.append("shared Xception source")
+        return None if not missing else "missing " + ", ".join(missing)
+
+    return "unknown model"
+
+
+def model_is_available(model_name: str, media_kind: str, args: argparse.Namespace) -> bool:
+    return model_unavailable_reason(model_name, media_kind, args) is None
+
+
+def available_model_names(media_kind: str, args: argparse.Namespace) -> list[str]:
+    return [
+        model_name
+        for model_name in MODEL_NAMES
+        if model_is_available(model_name, media_kind, args)
+    ]
+
+
+def selected_model_names(selection: str, media_kind: str, args: argparse.Namespace) -> list[str]:
+    if selection in {"available", "both"}:
+        return available_model_names(media_kind, args)
     if selection == "all":
         return MODEL_NAMES
     return [selection]
 
 
+def skipped_model_notes(selection: str, media_kind: str, args: argparse.Namespace) -> list[dict[str, str]]:
+    if selection not in {"available", "both"}:
+        return []
+    skipped = []
+    for model_name in MODEL_NAMES:
+        reason = model_unavailable_reason(model_name, media_kind, args)
+        if reason is not None:
+            skipped.append({"model": model_name, "note": reason})
+    return skipped
+
+
+def video_frame_limit(args: argparse.Namespace) -> int:
+    return args.video_frames if args.video_frames is not None else VIDEO_PRESETS[args.video_preset]
+
+
 def build_command(model_name: str, media_kind: str, args: argparse.Namespace, media_path: Path) -> list[str]:
     input_flag = "--image" if media_kind == "image" else "--video"
-    command = [sys.executable, str(RUNNERS[media_kind][model_name]), input_flag, str(media_path)]
+    command = [str(RUNNER_PYTHON), str(RUNNERS[media_kind][model_name]), input_flag, str(media_path)]
     if model_name == "altfreezing" and args.altfreezing_checkpoint:
         command.extend(["--checkpoint", str(args.altfreezing_checkpoint.resolve())])
     if model_name == "f3net" and args.f3net_checkpoint:
         command.extend(["--checkpoint", str(args.f3net_checkpoint.resolve())])
+    if model_name == "ucf" and args.ucf_checkpoint:
+        command.extend(["--checkpoint", str(args.ucf_checkpoint.resolve())])
     if model_name == "selfblendedimages" and args.selfblendedimages_weight:
         command.extend(["--weight", str(args.selfblendedimages_weight.resolve())])
-    if media_kind == "video" and args.video_frames is not None:
+    if media_kind == "video":
+        frame_limit = video_frame_limit(args)
         frame_flag = "--max-frame" if model_name == "altfreezing" else "--frames"
-        command.extend([frame_flag, str(args.video_frames)])
+        command.extend([frame_flag, str(frame_limit)])
     if media_kind == "video" and model_name == "selfblendedimages":
         command.extend(
             [
@@ -335,7 +511,7 @@ def format_video_summary(video: dict[str, object] | None) -> str:
     return "Video metadata: " + ", ".join(parts) + "." if parts else "Video metadata was not reported by the model runner."
 
 
-def explain_selection(details: dict[str, object]) -> str:
+def explain_selection(details: dict[str, object], model: str) -> str:
     selection = details.get("selection")
     if not isinstance(selection, dict):
         return "The model scored the video and returned frame-level evidence."
@@ -360,6 +536,13 @@ def explain_selection(details: dict[str, object]) -> str:
         )
 
     if mode == "uniform":
+        if model in {"f3net", "ucf"}:
+            label = MODEL_LABELS.get(model, model)
+            return (
+                f"{label} is image-based, so the wrapper sampled frames uniformly across the video and averaged "
+                f"their frame scores. It attempted {attempted} frames, decoded {decoded}, and scored {scored}. "
+                f"{video_summary}"
+            )
         return (
             "SelfBlendedImages used uniform sampling, spreading the frame budget across the whole video. "
             f"It attempted {attempted} frames, decoded {decoded}, and found scorable faces in {scored}. "
@@ -424,7 +607,7 @@ def build_human_explanation(result: dict[str, object]) -> dict[str, object] | No
         explanation["video"] = video
         explanation["video_summary"] = format_video_summary(video)
 
-    explanation["method"] = explain_selection(details)
+    explanation["method"] = explain_selection(details, model)
     top_frame = first_dict(details.get("top_frames"))
     top_window = first_dict(details.get("suspicious_windows"))
     window_text = format_window(top_window)
@@ -527,9 +710,10 @@ def reasoning_example(result: dict[str, object]) -> dict[str, object]:
         why = reason
 
     if frame is not None and frame_score is not None:
+        why_text = str(why).rstrip(".")
         example["example"] = (
             f"Peak evidence at frame {frame} ({format_seconds(time_seconds)}), "
-            f"frame score {float(frame_score):.4f}, based on {support}; {why}."
+            f"frame score {float(frame_score):.4f}, based on {support}; {why_text}."
         )
         example["frame"] = frame
         example["time_seconds"] = time_seconds
@@ -541,7 +725,11 @@ def reasoning_example(result: dict[str, object]) -> dict[str, object]:
     return example
 
 
-def build_summary(results: list[dict[str, object]]) -> dict[str, object]:
+def build_summary(
+    results: list[dict[str, object]],
+    skipped_models: list[dict[str, str]] | None = None,
+) -> dict[str, object]:
+    skipped_models = skipped_models or []
     ok_results = [
         result
         for result in results
@@ -576,6 +764,7 @@ def build_summary(results: list[dict[str, object]]) -> dict[str, object]:
             "model_explanations": [],
             "unavailable_models": unavailable,
             "error_models": errors,
+            "skipped_models": skipped_models,
         }
 
     final_score = sum(float(result["score"]) for result in ok_results) / len(ok_results)
@@ -612,12 +801,26 @@ def build_summary(results: list[dict[str, object]]) -> dict[str, object]:
         "model_explanations": model_explanations,
         "unavailable_models": unavailable,
         "error_models": errors,
+        "skipped_models": skipped_models,
     }
 
 
 def format_final_report(summary: dict[str, object]) -> str:
     if summary["final_score"] is None:
-        return "\nFINAL SUMMARY\nNo final score: no model returned a usable score."
+        lines = ["", "FINAL SUMMARY", "No final score: no model returned a usable score."]
+        unavailable = summary.get("unavailable_models")
+        if isinstance(unavailable, list) and unavailable:
+            lines.append("Unavailable models:")
+            for item in unavailable:
+                if isinstance(item, dict):
+                    lines.append(f"- {item.get('model')}: {item.get('note')}")
+        errors = summary.get("error_models")
+        if isinstance(errors, list) and errors:
+            lines.append("Models with errors:")
+            for item in errors:
+                if isinstance(item, dict):
+                    lines.append(f"- {item.get('model')}: {item.get('note')}")
+        return "\n".join(lines)
 
     lines = [
         "",
@@ -667,6 +870,13 @@ def format_final_report(summary: dict[str, object]) -> str:
     if isinstance(unavailable, list) and unavailable:
         names = ", ".join(str(item.get("model")) for item in unavailable if isinstance(item, dict))
         lines.append(f"Unavailable models skipped: {names}")
+
+    skipped = summary.get("skipped_models")
+    if isinstance(skipped, list) and skipped:
+        lines.append("Models not run because they are not available locally:")
+        for item in skipped:
+            if isinstance(item, dict):
+                lines.append(f"- {item.get('model')}: {item.get('note')}")
 
     errors = summary.get("error_models")
     if isinstance(errors, list) and errors:
@@ -762,9 +972,15 @@ def main() -> int:
         print(f"Unsupported media type for {media_path}. Supported extensions: {supported}", file=sys.stderr)
         return 2
 
-    selected_models = selected_model_names(args.model)
+    selected_models = selected_model_names(args.model, media_kind, args)
+    skipped_models = skipped_model_notes(args.model, media_kind, args)
+    if not selected_models:
+        print("No available models were found for this media type.", file=sys.stderr)
+        print("Run python .\\check_setup.py to see which weights or dependencies are missing.", file=sys.stderr)
+        return 1
+
     results = [run_model(model_name, media_kind, args, media_path) for model_name in selected_models]
-    summary = build_summary(results)
+    summary = build_summary(results, skipped_models)
 
     if args.json:
         payload = []

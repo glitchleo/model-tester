@@ -80,7 +80,24 @@ def extract_state_dict(checkpoint: object) -> dict:
     fail("Checkpoint does not contain a valid state dict.")
 
 
+def is_fad_backbone_checkpoint(state_dict: dict) -> bool:
+    keys = state_dict.keys()
+    return any(key.startswith("FAD_head.") for key in keys) and any(
+        key.startswith("backbone.") for key in keys
+    )
+
+
+def checkpoint_image_size(state_dict: dict, default: int = 299) -> int:
+    dct = state_dict.get("FAD_head._DCT_all")
+    if hasattr(dct, "shape") and len(dct.shape) == 2 and dct.shape[0] == dct.shape[1]:
+        return int(dct.shape[0])
+    return default
+
+
 def infer_mode(state_dict: dict) -> str:
+    if is_fad_backbone_checkpoint(state_dict):
+        return "FAD"
+
     keys = state_dict.keys()
     has_fad = any(key.startswith("FAD_head.") or key.startswith("FAD_xcep.") for key in keys)
     has_lfs = any(key.startswith("LFS_head.") or key.startswith("LFS_xcep.") for key in keys)
@@ -108,6 +125,68 @@ def torch_load_compat(torch_module, path: Path, device) -> object:
         return torch_module.load(path, map_location=device)
 
 
+def build_fad_backbone_model(torch_module, nn_module, f3net_models, xception_module, state_dict: dict):
+    image_size = checkpoint_image_size(state_dict)
+
+    class FADBackboneModel(nn_module.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.FAD_head = f3net_models.FAD_Head(image_size)
+            self.backbone = xception_module.Xception(num_classes=2)
+            self.backbone.conv1 = nn_module.Conv2d(12, 32, 3, 2, 0, bias=False)
+            if hasattr(self.backbone, "fc"):
+                delattr(self.backbone, "fc")
+            self.backbone.last_linear = nn_module.Sequential(
+                nn_module.Dropout(p=0.2),
+                nn_module.Linear(2048, 2),
+            )
+            self.backbone.adjust_channel = nn_module.Sequential(
+                nn_module.Conv2d(2048, 512, kernel_size=1),
+                nn_module.BatchNorm2d(512),
+                nn_module.ReLU(inplace=True),
+            )
+
+        def forward(self, tensor):
+            return self.backbone(self.FAD_head(tensor))
+
+    model = FADBackboneModel()
+    incompatible = model.load_state_dict(state_dict, strict=True)
+    if incompatible.missing_keys or incompatible.unexpected_keys:
+        fail(
+            "F3Net checkpoint did not match the local FAD-backbone model "
+            f"(missing={incompatible.missing_keys}, unexpected={incompatible.unexpected_keys})."
+        )
+    return model, image_size, "FAD-256" if image_size == 256 else f"FAD-{image_size}"
+
+
+def build_model(torch_module, nn_module, f3net_models, xception_module, state_dict: dict, backbone_path: Path):
+    if is_fad_backbone_checkpoint(state_dict):
+        return build_fad_backbone_model(torch_module, nn_module, f3net_models, xception_module, state_dict)
+
+    mode = infer_mode(state_dict)
+    original_get_xcep_state_dict = f3net_models.get_xcep_state_dict
+
+    def patched_get_xcep_state_dict(pretrained_path: str | None = None):
+        return original_get_xcep_state_dict(str(backbone_path))
+
+    f3net_models.get_xcep_state_dict = patched_get_xcep_state_dict
+    try:
+        model = f3net_models.F3Net(mode=mode)
+    finally:
+        f3net_models.get_xcep_state_dict = original_get_xcep_state_dict
+    model.load_state_dict(state_dict, strict=True)
+    return model, checkpoint_image_size(state_dict), mode
+
+
+def fakeness_from_logits(torch_module, logits) -> float:
+    logits = logits.reshape(logits.size(0), -1)
+    if logits.size(1) == 1:
+        scores = torch_module.sigmoid(logits[:, 0])
+    else:
+        scores = torch_module.softmax(logits, dim=1)[:, 1]
+    return float(scores.mean().item())
+
+
 def main() -> int:
     args = parse_args()
     image_path = args.image.resolve()
@@ -128,31 +207,24 @@ def main() -> int:
 
     try:
         import torch
+        from torch import nn
         from PIL import Image
         from torchvision import transforms
         import models as f3net_models
+        import xception as xception_module
     except Exception as exc:
         fail(f"Missing F3Net runtime dependency: {exc}")
 
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
     checkpoint = torch_load_compat(torch, checkpoint_path, device)
     state_dict = normalize_state_dict(extract_state_dict(checkpoint))
-    mode = infer_mode(state_dict)
-
-    original_get_xcep_state_dict = f3net_models.get_xcep_state_dict
-
-    def patched_get_xcep_state_dict(pretrained_path: str | None = None):
-        return original_get_xcep_state_dict(str(backbone_path))
-
-    f3net_models.get_xcep_state_dict = patched_get_xcep_state_dict
-
-    model = f3net_models.F3Net(mode=mode).to(device)
-    model.load_state_dict(state_dict, strict=True)
+    model, image_size, mode = build_model(torch, nn, f3net_models, xception_module, state_dict, backbone_path)
+    model = model.to(device)
     model.eval()
 
     transform = transforms.Compose(
         [
-            transforms.Resize((299, 299)),
+            transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
             transforms.Lambda(lambda tensor: tensor * 2.0 - 1.0),
         ]
@@ -162,7 +234,7 @@ def main() -> int:
 
     with torch.no_grad():
         _, logits = model(tensor)
-        score = float(torch.sigmoid(logits.squeeze()).item())
+        score = fakeness_from_logits(torch, logits)
 
     print(f"F3Net ({mode}) fakeness: {score:.4f}")
     print(f"SCORE:{score:.6f}")

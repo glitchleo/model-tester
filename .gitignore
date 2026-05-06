@@ -13,6 +13,8 @@ Thumbs.db
 # Keep project structure, but ignore model artifacts
 models/*/.torch-cache/
 models/*/repo/**/__pycache__/
+models/*/*.pth
+models/*/*.pt
 
 auxillary/*.pth
 !auxillary/.gitkeep

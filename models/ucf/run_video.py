@@ -2,30 +2,27 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 from run_image import (
-    BACKBONE_NAME,
-    MODEL_ROOT,
-    build_model,
-    extract_state_dict,
+    UCF_IMAGE_SIZE,
+    DEFAULT_CHECKPOINT,
     fail,
     fakeness_from_logits,
     find_repo_root,
-    normalize_state_dict,
-    resolve_detector_checkpoint,
-    torch_load_compat,
+    load_model,
+    ROOT,
 )
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run F3Net on sampled frames from one video.")
+    parser = argparse.ArgumentParser(description="Run UCF on sampled frames from one video.")
     parser.add_argument("--video", type=Path, required=True, help="Path to the input video.")
     parser.add_argument(
         "--checkpoint",
         type=Path,
-        help="Optional trained F3Net detector checkpoint.",
+        default=DEFAULT_CHECKPOINT,
+        help="Optional UCF detector checkpoint.",
     )
     parser.add_argument(
         "--frames",
@@ -115,7 +112,7 @@ def build_details(
                 "frame": frame_index,
                 "time_seconds": None if seconds is None else round(seconds, 3),
                 "score": round(float(frame_score), 6),
-                "reason": "The wrapper reports this frame because it had the highest F3Net score among the sampled frames.",
+                "reason": "The wrapper reports this frame because it had the highest UCF score among the sampled frames.",
             }
         )
 
@@ -161,45 +158,37 @@ def main() -> int:
     if not video_path.is_file():
         fail(f"Input video not found: {video_path}")
 
-    weights_dir = MODEL_ROOT / "weights"
-    backbone_path = weights_dir / BACKBONE_NAME
-    if not backbone_path.is_file():
-        fail(
-            f"Missing the required Xception backbone at {backbone_path}.",
-            unavailable=True,
-        )
+    checkpoint_path = args.checkpoint.resolve()
+    if not checkpoint_path.is_file():
+        fail(f"UCF checkpoint not found: {checkpoint_path}", unavailable=True)
 
-    checkpoint_path = resolve_detector_checkpoint(weights_dir, args.checkpoint)
-    repo_root = find_repo_root(MODEL_ROOT / "repo", "models.py")
-    sys.path.insert(0, str(repo_root))
+    repo_root = find_repo_root(ROOT / "models" / "f3net" / "repo", "xception.py")
 
     try:
+        import sys
         import cv2
         import numpy as np
         import torch
         from torch import nn
         from PIL import Image
         from torchvision import transforms
-        import models as f3net_models
+
+        sys.path.insert(0, str(repo_root))
         import xception as xception_module
     except Exception as exc:
-        fail(f"Missing F3Net runtime dependency: {exc}")
+        fail(f"Missing UCF runtime dependency: {exc}")
 
     video_info = read_video_info(cv2, video_path)
     sampled_frames = sample_video_frames(cv2, np, video_path, args.frames)
     if not sampled_frames:
-        fail(f"F3Net could not decode any frames from {video_path}.")
+        fail(f"UCF could not decode any frames from {video_path}.")
 
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
-    checkpoint = torch_load_compat(torch, checkpoint_path, device)
-    state_dict = normalize_state_dict(extract_state_dict(checkpoint))
-    model, image_size, mode = build_model(torch, nn, f3net_models, xception_module, state_dict, backbone_path)
-    model = model.to(device)
-    model.eval()
+    model = load_model(torch, nn, xception_module, checkpoint_path, device)
 
     transform = transforms.Compose(
         [
-            transforms.Resize((image_size, image_size)),
+            transforms.Resize((UCF_IMAGE_SIZE, UCF_IMAGE_SIZE)),
             transforms.ToTensor(),
             transforms.Lambda(lambda tensor: tensor * 2.0 - 1.0),
         ]
@@ -212,18 +201,18 @@ def main() -> int:
     ).to(device)
 
     with torch.no_grad():
-        _, logits = model(batch)
+        logits = model(batch)
         scores = [
             fakeness_from_logits(torch, logits[index : index + 1])
             for index in range(logits.size(0))
         ]
 
     if not scores:
-        fail(f"F3Net did not produce any predictions for {video_path}.")
+        fail(f"UCF did not produce any predictions for {video_path}.")
 
     score = float(np.mean(scores))
     details = build_details(sampled_frames, scores, video_info, max(args.frames, 1))
-    print(f"F3Net ({mode}) video fakeness: {score:.4f}")
+    print(f"UCF video fakeness: {score:.4f}")
     print(f"Frames scored: {len(scores)}")
     print("DETAIL_JSON:" + json.dumps(details, separators=(",", ":")))
     print(f"SCORE:{score:.6f}")
