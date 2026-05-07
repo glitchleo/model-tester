@@ -13,6 +13,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 REPO_VENV = ROOT / ".venv"
 F3NET_BACKBONE = "xception-b5690688.pth"
+EFFORT_CHECKPOINT = "effort_clip_L14_trainOn_FaceForensic.pth"
+EFFORT_CLIP_DIR = "clip-vit-large-patch14"
+RECCE_CHECKPOINT = "recce_best.pth"
 
 
 @dataclass(frozen=True)
@@ -56,11 +59,19 @@ IMPORT_GROUPS = {
         ("efficientnet_pytorch", "efficientnet-pytorch"),
         ("retinaface", "retinaface-pytorch"),
     ],
+    "EFFORT runtime": [
+        ("transformers", "transformers"),
+    ],
+    "RECCE runtime": [
+        ("timm", "timm"),
+    ],
 }
 MODEL_IMPORT_GROUPS = {
     "all": list(IMPORT_GROUPS),
     "altfreezing": ["core runtime", "AltFreezing runtime"],
+    "effort": ["core runtime", "EFFORT runtime"],
     "f3net": ["core runtime"],
+    "recce": ["core runtime", "RECCE runtime"],
     "selfblendedimages": ["core runtime", "SelfBlendedImages runtime"],
     "ucf": ["core runtime"],
 }
@@ -75,7 +86,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--model",
-        choices=["all", "altfreezing", "f3net", "selfblendedimages", "ucf"],
+        choices=["all", "altfreezing", "effort", "f3net", "recce", "selfblendedimages", "ucf"],
         default="all",
         help="Model to validate and use for --smoke. Defaults to all.",
     )
@@ -218,7 +229,14 @@ def check_torch(model: str) -> list[Check]:
 def check_repos(model: str) -> list[Check]:
     markers = [
         ("altfreezing", "AltFreezing repo", ROOT / "models" / "altfreezing" / "repo", "demo.py"),
+        (
+            "effort",
+            "EFFORT repo",
+            ROOT / "models" / "effort" / "repo",
+            "DeepfakeBench/training/demo.py",
+        ),
         ("f3net", "F3Net repo", ROOT / "models" / "f3net" / "repo", "models.py"),
+        ("recce", "RECCE repo", ROOT / "models" / "recce" / "repo", "model/network/Recce.py"),
         ("ucf", "UCF shared Xception source", ROOT / "models" / "f3net" / "repo", "xception.py"),
         (
             "selfblendedimages",
@@ -286,6 +304,47 @@ def check_assets(model: str) -> list[Check]:
         else:
             checks.append(Check("OK", "AltFreezing auxiliary weights", "Both auxiliary weights are present."))
 
+    if model in {"all", "effort"}:
+        effort_root = ROOT / "models" / "effort"
+        effort_checkpoint = effort_root / "weights" / EFFORT_CHECKPOINT
+        if effort_checkpoint.is_file() and effort_checkpoint.stat().st_size > 1024 * 1024:
+            checks.append(Check("OK", "EFFORT checkpoint", f"Found {EFFORT_CHECKPOINT}."))
+        else:
+            checks.append(
+                Check(
+                    "FAIL",
+                    "EFFORT checkpoint",
+                    f"No usable {EFFORT_CHECKPOINT} was found.",
+                    "Put it in models/effort/weights/.",
+                )
+            )
+
+        clip_dir = effort_root / "pretrained" / EFFORT_CLIP_DIR
+        clip_config = clip_dir / "config.json"
+        clip_weights = clip_dir / "model.safetensors"
+        if clip_config.is_file():
+            checks.append(Check("OK", "EFFORT CLIP config", f"Found {clip_config.name}."))
+        else:
+            checks.append(
+                Check(
+                    "FAIL",
+                    "EFFORT CLIP config",
+                    f"Missing {clip_config}.",
+                    "Put the openai/clip-vit-large-patch14 config in models/effort/pretrained/clip-vit-large-patch14/.",
+                )
+            )
+        if clip_weights.is_file() and clip_weights.stat().st_size > 1024 * 1024:
+            checks.append(Check("OK", "EFFORT CLIP weights", f"Found {clip_weights.name}."))
+        else:
+            checks.append(
+                Check(
+                    "WARN",
+                    "EFFORT CLIP weights",
+                    "model.safetensors was not found. The local runner can load the full EFFORT checkpoint, but the upstream repo expects the CLIP file.",
+                    "Put model.safetensors in models/effort/pretrained/clip-vit-large-patch14/ if you want the full local upstream setup.",
+                )
+            )
+
     if model in {"all", "f3net"}:
         f3net_weights = ROOT / "models" / "f3net" / "weights"
         if (f3net_weights / F3NET_BACKBONE).is_file():
@@ -314,6 +373,20 @@ def check_assets(model: str) -> list[Check]:
                     "F3Net detector checkpoint",
                     "No trained F3Net detector checkpoint was found.",
                     "Add a trained F3Net detector checkpoint to models/f3net/weights/.",
+                )
+            )
+
+    if model in {"all", "recce"}:
+        recce_checkpoint = ROOT / "models" / "recce" / "weights" / RECCE_CHECKPOINT
+        if recce_checkpoint.is_file() and recce_checkpoint.stat().st_size > 1024 * 1024:
+            checks.append(Check("OK", "RECCE checkpoint", f"Found {RECCE_CHECKPOINT}."))
+        else:
+            checks.append(
+                Check(
+                    "FAIL",
+                    "RECCE checkpoint",
+                    f"No usable {RECCE_CHECKPOINT} was found.",
+                    "Put it in models/recce/weights/.",
                 )
             )
 

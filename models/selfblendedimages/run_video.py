@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--frame-mode",
         choices=["adaptive", "uniform", "all"],
-        default="adaptive",
+        default="uniform",
         help=(
             "Frame selection strategy. 'adaptive' does a coarse interval pass and then samples near the "
             "highest-scoring moments; 'uniform' samples evenly; 'all' scores every decoded frame."
@@ -132,7 +132,8 @@ def uniform_indices(np_module, total_frames: int, requested_count: int) -> list[
     if total_frames <= 0:
         return []
     sample_count = min(max(requested_count, 1), total_frames)
-    return unique_sorted_indices(np_module.linspace(0, total_frames - 1, sample_count), total_frames)
+    step = total_frames / sample_count
+    return sorted({min(int(index * step), total_frames - 1) for index in range(sample_count)})
 
 
 def anchor_indices(total_frames: int) -> list[int]:

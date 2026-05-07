@@ -13,8 +13,10 @@ Thumbs.db
 # Keep project structure, but ignore model artifacts
 models/*/.torch-cache/
 models/*/repo/**/__pycache__/
+models/*/repo/**/results/**
 models/*/*.pth
 models/*/*.pt
+models/*/*.safetensors
 
 auxillary/*.pth
 !auxillary/.gitkeep
@@ -25,6 +27,13 @@ models/*/weights/*
 
 models/*/checkpoints/*
 !models/*/checkpoints/.gitkeep
+
+models/*/pretrained/**
+!models/*/pretrained/
+!models/*/pretrained/.gitkeep
+
+models/*/landmarks/*
+!models/*/landmarks/.gitkeep
 
 # Keep dataset folders, but ignore dataset files
 data/datasets/*

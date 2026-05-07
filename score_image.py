@@ -14,39 +14,51 @@ REPO_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 RUNNER_PYTHON = REPO_PYTHON if REPO_PYTHON.is_file() else Path(sys.executable)
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 VIDEO_SUFFIXES = {".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"}
-MODEL_NAMES = ["altfreezing", "f3net", "selfblendedimages", "ucf"]
+VIDEO_LIST_SUFFIXES = {".lst", ".txt"}
+MODEL_NAMES = ["altfreezing", "effort", "f3net", "recce", "selfblendedimages", "ucf"]
 MIN_WEIGHT_BYTES = 1024 * 1024
 VIDEO_PRESETS = {
     "quick": 8,
     "balanced": 32,
     "thorough": 96,
 }
+ALTFREEZING_DEFAULT_MAX_FRAME = 400
 MODEL_LABELS = {
     "altfreezing": "AltFreezing",
+    "effort": "EFFORT",
     "f3net": "F3Net",
+    "recce": "RECCE",
     "selfblendedimages": "SelfBlendedImages",
     "ucf": "UCF",
 }
 RUNNERS = {
     "image": {
         "altfreezing": ROOT / "models" / "altfreezing" / "run_image.py",
+        "effort": ROOT / "models" / "effort" / "run_image.py",
         "f3net": ROOT / "models" / "f3net" / "run_image.py",
+        "recce": ROOT / "models" / "recce" / "run_image.py",
         "selfblendedimages": ROOT / "models" / "selfblendedimages" / "run_image.py",
         "ucf": ROOT / "models" / "ucf" / "run_image.py",
     },
     "video": {
         "altfreezing": ROOT / "models" / "altfreezing" / "run_video.py",
+        "effort": ROOT / "models" / "effort" / "run_video.py",
         "f3net": ROOT / "models" / "f3net" / "run_video.py",
+        "recce": ROOT / "models" / "recce" / "run_video.py",
         "selfblendedimages": ROOT / "models" / "selfblendedimages" / "run_video.py",
         "ucf": ROOT / "models" / "ucf" / "run_video.py",
     },
 }
 SUCCESS_NOTES = {
     ("image", "altfreezing"): "single image duplicated into a short video clip because the original model is video-based",
+    ("image", "effort"): "image resized and normalized for the EFFORT CLIP-L14 detector",
     ("image", "f3net"): "image resized and scored with the F3Net FAD detector",
+    ("image", "recce"): "image resized and scored with the RECCE reconstruction-classification detector",
     ("image", "ucf"): "image resized and scored with the UCF shared-feature detector",
     ("video", "altfreezing"): "native video model using temporal face-track clips",
+    ("video", "effort"): "video sampled into frames and averaged because EFFORT is image-based",
     ("video", "f3net"): "video sampled into frames and averaged because F3Net is image-based",
+    ("video", "recce"): "video sampled into frames and averaged because RECCE is image-based",
     ("video", "selfblendedimages"): "video sampled into frames and averaged because SelfBlendedImages is image-based",
     ("video", "ucf"): "video sampled into frames and averaged because UCF is image-based",
 }
@@ -59,7 +71,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Score one image or video with one model or all configured models.",
     )
-    parser.add_argument("media", type=Path, help="Path to the input image or video.")
+    parser.add_argument("media", type=Path, help="Path to an input image/video, a video folder, or a .txt/.lst video list.")
+    parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="When media is a folder, include videos from subfolders too.",
+    )
     parser.add_argument(
         "--model",
         choices=["available", "both", "all", *MODEL_NAMES],
@@ -75,9 +92,24 @@ def parse_args() -> argparse.Namespace:
         help="Optional override for the AltFreezing checkpoint.",
     )
     parser.add_argument(
+        "--effort-checkpoint",
+        type=Path,
+        help="Optional override for the EFFORT checkpoint.",
+    )
+    parser.add_argument(
+        "--effort-clip-model",
+        type=Path,
+        help="Optional override for the local CLIP ViT-L/14 config directory.",
+    )
+    parser.add_argument(
         "--f3net-checkpoint",
         type=Path,
         help="Optional override for the F3Net detector checkpoint.",
+    )
+    parser.add_argument(
+        "--recce-checkpoint",
+        type=Path,
+        help="Optional override for the RECCE detector checkpoint.",
     )
     parser.add_argument(
         "--ucf-checkpoint",
@@ -93,23 +125,36 @@ def parse_args() -> argparse.Namespace:
         "--video-frames",
         type=int,
         help=(
-            "Optional frame count for video scoring. For AltFreezing this is --max-frame; "
-            "for F3Net and UCF this is uniform sampled frames; for SelfBlendedImages this is the adaptive/uniform frame limit."
+            "Optional frame count for frame-based video scoring. F3Net and UCF sample this many frames uniformly; "
+            "SelfBlendedImages uses it as the adaptive/uniform frame limit. AltFreezing ignores this and uses "
+            "its native video path."
+        ),
+    )
+    parser.add_argument(
+        "--altfreezing-max-frame",
+        type=int,
+        default=ALTFREEZING_DEFAULT_MAX_FRAME,
+        help=(
+            "Maximum leading video frames decoded by AltFreezing's native runner. Defaults to the upstream demo "
+            f"setting of {ALTFREEZING_DEFAULT_MAX_FRAME}; this is separate from --video-frames."
         ),
     )
     parser.add_argument(
         "--video-preset",
         choices=list(VIDEO_PRESETS),
         default="quick",
-        help="Video test budget used when --video-frames is not provided. Defaults to quick.",
+        help=(
+            "Frame-based video test budget used when --video-frames is not provided. Defaults to quick. "
+            "AltFreezing uses --altfreezing-max-frame instead."
+        ),
     )
     parser.add_argument(
         "--video-frame-mode",
         choices=["adaptive", "uniform", "all"],
-        default="adaptive",
+        default="uniform",
         help=(
-            "SelfBlendedImages video frame strategy. Adaptive does a coarse interval pass and then refines "
-            "around the highest-scoring moments."
+            "SelfBlendedImages video frame strategy. Uniform uses the same fixed interval rule as the other "
+            "frame-based models; adaptive does a coarse interval pass and then refines around the highest-scoring moments."
         ),
     )
     parser.add_argument(
@@ -160,6 +205,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.video_frames is not None and args.video_frames < 1:
         parser.error("--video-frames must be at least 1.")
+    if args.altfreezing_max_frame < 1:
+        parser.error("--altfreezing-max-frame must be at least 1.")
     if args.video_frame_interval < 1:
         parser.error("--video-frame-interval must be at least 1.")
     if args.video_refine_window < 0:
@@ -180,6 +227,132 @@ def infer_media_kind(media_path: Path) -> str | None:
     if suffix in VIDEO_SUFFIXES:
         return "video"
     return None
+
+
+def collect_video_paths(media_path: Path, recursive: bool) -> tuple[list[Path], Path]:
+    if media_path.is_dir():
+        iterator = media_path.rglob("*") if recursive else media_path.iterdir()
+        videos = sorted(
+            path.resolve()
+            for path in iterator
+            if path.is_file() and path.suffix.lower() in VIDEO_SUFFIXES
+        )
+        return videos, media_path.resolve()
+
+    if media_path.is_file() and media_path.suffix.lower() in VIDEO_LIST_SUFFIXES:
+        videos = []
+        base_dir = media_path.resolve().parent
+        for raw_line in media_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip().lstrip("\ufeff")
+            if not line or line.startswith("#"):
+                continue
+            candidate = Path(line)
+            if not candidate.is_absolute():
+                candidate = base_dir / candidate
+            candidate = candidate.resolve()
+            if candidate.is_file() and candidate.suffix.lower() in VIDEO_SUFFIXES:
+                videos.append(candidate)
+        return videos, base_dir
+
+    return [], media_path.resolve().parent
+
+
+def clean_cell(value: object) -> str:
+    text = "" if value is None else str(value)
+    return text.replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
+
+
+def score_cell(result: dict[str, object] | None) -> str:
+    if not result:
+        return "-"
+    if result["status"] == "ok" and isinstance(result.get("score"), (int, float)):
+        return f"{float(result['score']):.6f}"
+    note = clean_cell(result.get("note"))
+    if result["status"] == "unavailable":
+        return "NA" if not note else f"NA:{note}"
+    return "ERR" if not note else f"ERR:{note}"
+
+
+def relative_video_label(video_path: Path, base_dir: Path) -> str:
+    try:
+        return str(video_path.relative_to(base_dir))
+    except ValueError:
+        return str(video_path)
+
+
+def format_batch_report(
+    rows: list[dict[str, object]],
+    model_names: list[str],
+) -> str:
+    headers = ["video", "total_frames", "final_score", "status", *model_names]
+    lines = ["\t".join(headers)]
+    for row in rows:
+        cells = [
+            clean_cell(row.get("video")),
+            clean_cell(row.get("total_frames", "-")),
+            clean_cell(row.get("final_score", "-")),
+            clean_cell(row.get("status", "-")),
+        ]
+        model_scores = row.get("model_scores")
+        if not isinstance(model_scores, dict):
+            model_scores = {}
+        cells.extend(clean_cell(model_scores.get(model_name, "-")) for model_name in model_names)
+        lines.append("\t".join(cells))
+    return "\n".join(lines)
+
+
+def score_video_batch(args: argparse.Namespace, media_path: Path) -> int:
+    video_paths, base_dir = collect_video_paths(media_path, args.recursive)
+    if not video_paths:
+        print(f"No video files found in {media_path}.", file=sys.stderr)
+        return 1
+
+    model_names = selected_model_names(args.model, "video", args)
+    if not model_names:
+        print("No available video models were found.", file=sys.stderr)
+        print("Run python .\\check_setup.py to see which weights or dependencies are missing.", file=sys.stderr)
+        return 1
+
+    rows = []
+    had_success = False
+    had_error = False
+    for video_path in video_paths:
+        results = [run_model(model_name, "video", args, video_path) for model_name in model_names]
+        ok_results = [
+            result
+            for result in results
+            if result["status"] == "ok" and isinstance(result.get("score"), (int, float))
+        ]
+        had_success = had_success or bool(ok_results)
+        had_error = had_error or any(result["status"] == "error" for result in results)
+        final_score = (
+            sum(float(result["score"]) for result in ok_results) / len(ok_results)
+            if ok_results
+            else None
+        )
+        video = next(
+            (
+                video_info
+                for video_info in (video_metadata(result.get("details")) for result in results)
+                if video_info is not None
+            ),
+            None,
+        )
+        rows.append(
+            {
+                "video": relative_video_label(video_path, base_dir),
+                "total_frames": "-" if not video else video.get("total_frames", "-"),
+                "final_score": "-" if final_score is None else f"{final_score:.6f}",
+                "status": "no_score" if final_score is None else score_label(final_score),
+                "model_scores": {
+                    str(result["model"]): score_cell(result)
+                    for result in results
+                },
+            }
+        )
+
+    print(format_batch_report(rows, model_names))
+    return 0 if had_success and not had_error else 1
 
 
 def large_file(path: Path) -> bool:
@@ -249,6 +422,27 @@ def model_unavailable_reason(model_name: str, media_kind: str, args: argparse.Na
             missing.append("AltFreezing source repo")
         return None if not missing else "missing " + ", ".join(missing)
 
+    if model_name == "effort":
+        model_root = ROOT / "models" / "effort"
+        checkpoint = (
+            args.effort_checkpoint.resolve()
+            if args.effort_checkpoint
+            else model_root / "weights" / "effort_clip_L14_trainOn_FaceForensic.pth"
+        )
+        clip_model = (
+            args.effort_clip_model.resolve()
+            if args.effort_clip_model
+            else model_root / "pretrained" / "clip-vit-large-patch14"
+        )
+        missing = []
+        if not large_file(checkpoint):
+            missing.append("EFFORT checkpoint")
+        if not (clip_model / "config.json").is_file():
+            missing.append("CLIP ViT-L/14 config")
+        if not repo_has_marker(model_root / "repo", "DeepfakeBench/training/demo.py"):
+            missing.append("EFFORT source repo")
+        return None if not missing else "missing " + ", ".join(missing)
+
     if model_name == "f3net":
         weights_dir = ROOT / "models" / "f3net" / "weights"
         backbone_ok = (weights_dir / "xception-b5690688.pth").is_file()
@@ -268,6 +462,22 @@ def model_unavailable_reason(model_name: str, media_kind: str, args: argparse.Na
             missing.append("F3Net detector checkpoint")
         if not repo_has_marker(ROOT / "models" / "f3net" / "repo", "models.py"):
             missing.append("F3Net source repo")
+        return None if not missing else "missing " + ", ".join(missing)
+
+    if model_name == "recce":
+        model_root = ROOT / "models" / "recce"
+        checkpoint = (
+            args.recce_checkpoint.resolve()
+            if args.recce_checkpoint
+            else model_root / "weights" / "recce_best.pth"
+        )
+        checkpoint_ok = large_file(checkpoint)
+        repo_ok = repo_has_marker(model_root / "repo", "model/network/Recce.py")
+        missing = []
+        if not checkpoint_ok:
+            missing.append("RECCE checkpoint")
+        if not repo_ok:
+            missing.append("RECCE source repo")
         return None if not missing else "missing " + ", ".join(missing)
 
     if model_name == "selfblendedimages":
@@ -340,16 +550,23 @@ def build_command(model_name: str, media_kind: str, args: argparse.Namespace, me
     command = [str(RUNNER_PYTHON), str(RUNNERS[media_kind][model_name]), input_flag, str(media_path)]
     if model_name == "altfreezing" and args.altfreezing_checkpoint:
         command.extend(["--checkpoint", str(args.altfreezing_checkpoint.resolve())])
+    if model_name == "effort" and args.effort_checkpoint:
+        command.extend(["--checkpoint", str(args.effort_checkpoint.resolve())])
+    if model_name == "effort" and args.effort_clip_model:
+        command.extend(["--clip-model", str(args.effort_clip_model.resolve())])
     if model_name == "f3net" and args.f3net_checkpoint:
         command.extend(["--checkpoint", str(args.f3net_checkpoint.resolve())])
+    if model_name == "recce" and args.recce_checkpoint:
+        command.extend(["--checkpoint", str(args.recce_checkpoint.resolve())])
     if model_name == "ucf" and args.ucf_checkpoint:
         command.extend(["--checkpoint", str(args.ucf_checkpoint.resolve())])
     if model_name == "selfblendedimages" and args.selfblendedimages_weight:
         command.extend(["--weight", str(args.selfblendedimages_weight.resolve())])
     if media_kind == "video":
-        frame_limit = video_frame_limit(args)
-        frame_flag = "--max-frame" if model_name == "altfreezing" else "--frames"
-        command.extend([frame_flag, str(frame_limit)])
+        if model_name == "altfreezing":
+            command.extend(["--max-frame", str(args.altfreezing_max_frame)])
+        else:
+            command.extend(["--frames", str(video_frame_limit(args))])
     if media_kind == "video" and model_name == "selfblendedimages":
         command.extend(
             [
@@ -536,7 +753,7 @@ def explain_selection(details: dict[str, object], model: str) -> str:
         )
 
     if mode == "uniform":
-        if model in {"f3net", "ucf"}:
+        if model in {"effort", "f3net", "recce", "ucf"}:
             label = MODEL_LABELS.get(model, model)
             return (
                 f"{label} is image-based, so the wrapper sampled frames uniformly across the video and averaged "
@@ -635,6 +852,18 @@ def build_human_explanation(result: dict[str, object]) -> dict[str, object] | No
                 "appear inside the strongest suspicious clips. Its evidence is based on tracked facial motion and "
                 "appearance over a short time window, not on a single isolated image crop."
             )
+        elif model == "effort":
+            evidence_source = "sampled frame evidence"
+            model_reason = (
+                "EFFORT uses a CLIP-L14 vision backbone with orthogonal residual attention layers, so this wrapper "
+                "highlights the sampled frame with the strongest fake-class response."
+            )
+        elif model == "recce":
+            evidence_source = "sampled frame evidence"
+            model_reason = (
+                "RECCE combines reconstruction and classification signals, so this wrapper highlights the sampled "
+                "frame with the strongest fake-class response."
+            )
         else:
             evidence_source = "sampled frame evidence"
             model_reason = "This model highlights the sampled frame with the strongest score."
@@ -702,6 +931,12 @@ def reasoning_example(result: dict[str, object]) -> dict[str, object]:
     elif model == "selfblendedimages":
         support = f"{face_count} detected face crop(s)" if face_count is not None else "detected face crops"
         why = "the detected face crop had the strongest frame-level fakeness response there"
+    elif model == "effort":
+        support = "sampled frame evidence"
+        why = "the EFFORT CLIP-L14 detector had the strongest fake-class response there"
+    elif model == "recce":
+        support = "sampled frame evidence"
+        why = "the RECCE reconstruction-classification detector had the strongest fake-class response there"
     else:
         support = "sampled frame evidence"
         why = "this was one of the highest-scoring sampled frames"
@@ -962,6 +1197,9 @@ def format_table(results: list[dict[str, object]]) -> str:
 def main() -> int:
     args = parse_args()
     media_path = args.media.resolve()
+    if media_path.is_dir() or (media_path.is_file() and media_path.suffix.lower() in VIDEO_LIST_SUFFIXES):
+        return score_video_batch(args, media_path)
+
     if not media_path.is_file():
         print(f"Input media not found: {media_path}", file=sys.stderr)
         return 2

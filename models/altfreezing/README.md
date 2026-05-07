@@ -34,7 +34,8 @@ The AltFreezing rows should be OK, and CUDA must be available.
 Video:
 
 ```powershell
-python .\score_image.py .\data\samples\your_video.mp4 --model altfreezing --video-frames 400 --json
+python .\score_image.py .\data\samples\your_video.mp4 --model altfreezing --json
+python .\score_image.py .\data\samples\your_video.mp4 --model altfreezing --altfreezing-max-frame 400 --json
 ```
 
 Direct wrapper:
@@ -53,7 +54,8 @@ AltFreezing is a video model. The image wrapper duplicates the input image into 
 
 ## Notes
 
-- `--video-frames` in `score_image.py` is passed to AltFreezing as `--max-frame`.
+- `--video-frames` in `score_image.py` is for frame-based video wrappers and is ignored by AltFreezing.
+- `--altfreezing-max-frame` controls AltFreezing's native leading-frame cap. It defaults to the upstream demo value of 400.
 - Top-level scoring skips the annotated AltFreezing output video by default. Add `--write-altfreezing-output` to write it under `outputs/altfreezing/`.
 - The wrapper emits `DETAIL_JSON` with top suspicious frames, suspicious windows, total video frames, fps, resolution, and a human-readable explanation.
 - PyTorch 2.6+ changed `torch.load` defaults. The local wrapper and patched upstream load helpers explicitly use compatibility loading for AltFreezing checkpoints and cached detection files.

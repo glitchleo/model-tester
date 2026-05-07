@@ -48,7 +48,8 @@ def sample_video_frames(cv2_module, np_module, video_path: Path, requested_count
     total_frames = int(capture.get(cv2_module.CAP_PROP_FRAME_COUNT) or 0)
     if total_frames > 0:
         sample_count = min(requested_count, total_frames)
-        frame_indices = sorted(set(int(index) for index in np_module.linspace(0, total_frames - 1, sample_count)))
+        step = total_frames / sample_count
+        frame_indices = sorted({min(int(index * step), total_frames - 1) for index in range(sample_count)})
         for frame_index in frame_indices:
             capture.set(cv2_module.CAP_PROP_POS_FRAMES, frame_index)
             ok, frame = capture.read()
