@@ -1,0 +1,17 @@
+services:
+  backend:
+    build:
+      context: .
+      args:
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    image: model-tester-backend:latest
+    ports:
+      - "8000:8000"
+    environment:
+      MODEL_TESTER_DEFAULT_MODEL: ${MODEL_TESTER_DEFAULT_MODEL:-available}
+    volumes:
+      - ./models:/app/models
+      - ./auxillary:/app/auxillary
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+

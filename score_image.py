@@ -445,7 +445,6 @@ def model_unavailable_reason(model_name: str, media_kind: str, args: argparse.Na
 
     if model_name == "f3net":
         weights_dir = ROOT / "models" / "f3net" / "weights"
-        backbone_ok = (weights_dir / "xception-b5690688.pth").is_file()
         detector_ok = (
             args.f3net_checkpoint.resolve().is_file()
             if args.f3net_checkpoint
@@ -456,8 +455,6 @@ def model_unavailable_reason(model_name: str, media_kind: str, args: argparse.Na
             )
         )
         missing = []
-        if not backbone_ok:
-            missing.append("Xception backbone")
         if not detector_ok:
             missing.append("F3Net detector checkpoint")
         if not repo_has_marker(ROOT / "models" / "f3net" / "repo", "models.py"):

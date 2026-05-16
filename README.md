@@ -159,6 +159,99 @@ Frame-based video wrappers use fixed interval sampling from the first decoded fr
 
 The final report includes the models that ran, any locally unavailable models that were skipped, the combined score, video metadata, peak sampled frames, and a short explanation of what the score means.
 
+## Standard Prediction CLI
+
+Use `predict.py` when you want each model to behave like a small black box: input media in, standardized JSON out.
+
+```powershell
+python .\predict.py --model f3net --input .\data\samples\your_video.mp4 --pretty
+python .\predict.py --model sbi --input .\data\samples\your_image.jpg --pretty
+```
+
+The per-model folders also include tiny shims, so this works when testing one model in isolation:
+
+```powershell
+cd .\models\f3net
+python .\predict.py --input ..\..\data\samples\your_video.mp4 --pretty
+```
+
+Successful output uses the same structure for every model:
+
+```json
+{
+  "model_name": "F3Net",
+  "model_id": "f3net",
+  "input_type": "video",
+  "fake_score": 0.73,
+  "real_score": 0.27,
+  "status": "suspicious",
+  "processing_time": 4.2
+}
+```
+
+If you run `--model available` or `--model all`, the CLI returns a combined summary plus one standardized result per model.
+
+## Backend API
+
+The FastAPI backend processes uploads immediately, which keeps the thesis demo simple while still giving the app stable API boundaries.
+
+Start it locally:
+
+```powershell
+python -m uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
+```
+
+Endpoints:
+
+```text
+POST /analyze-image
+POST /analyze-video
+GET  /result/{id}
+GET  /models
+GET  /health
+```
+
+Example upload:
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8000/analyze-video" `
+  -F "file=@data/samples/your_video.mp4" `
+  -F "model=f3net" `
+  -F "video_frames=8"
+```
+
+The response includes an `id`; fetch it later with:
+
+```powershell
+curl.exe "http://127.0.0.1:8000/result/YOUR_RESULT_ID"
+```
+
+Check what the backend can actually run in the current environment:
+
+```powershell
+curl.exe "http://127.0.0.1:8000/models"
+curl.exe "http://127.0.0.1:8000/models?input_type=video"
+```
+
+Uploaded files are saved under `outputs/uploads/`, and result JSON is saved under `outputs/api_results/`.
+
+## Docker Backend
+
+The first Docker target is one backend container. The build context excludes large local weights and sample media; `docker-compose.yml` mounts `models/`, `auxillary/`, `data/`, and `outputs/` at runtime so your local checkpoints are still visible inside the container.
+
+```powershell
+docker compose build
+docker compose up backend
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8000/health
+```
+
+By default the Dockerfile installs CPU PyTorch. That is enough for CPU-capable wrappers, but AltFreezing is expected to report unavailable unless you later move to a CUDA-enabled image/runtime.
+
 Batch video table:
 
 ```powershell

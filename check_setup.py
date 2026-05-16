@@ -35,6 +35,11 @@ IMPORT_GROUPS = {
         ("numpy", "numpy"),
         ("tqdm", "tqdm"),
     ],
+    "backend API": [
+        ("fastapi", "fastapi"),
+        ("uvicorn", "uvicorn"),
+        ("multipart", "python-multipart"),
+    ],
     "AltFreezing runtime": [
         ("albumentations", "albumentations"),
         ("contexttimer", "contexttimer"),

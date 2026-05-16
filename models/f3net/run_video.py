@@ -164,12 +164,6 @@ def main() -> int:
 
     weights_dir = MODEL_ROOT / "weights"
     backbone_path = weights_dir / BACKBONE_NAME
-    if not backbone_path.is_file():
-        fail(
-            f"Missing the required Xception backbone at {backbone_path}.",
-            unavailable=True,
-        )
-
     checkpoint_path = resolve_detector_checkpoint(weights_dir, args.checkpoint)
     repo_root = find_repo_root(MODEL_ROOT / "repo", "models.py")
     sys.path.insert(0, str(repo_root))

@@ -163,6 +163,13 @@ def build_model(torch_module, nn_module, f3net_models, xception_module, state_di
     if is_fad_backbone_checkpoint(state_dict):
         return build_fad_backbone_model(torch_module, nn_module, f3net_models, xception_module, state_dict)
 
+    if not backbone_path.is_file():
+        fail(
+            f"Missing the required Xception backbone at {backbone_path}. "
+            "This checkpoint format needs the upstream F3Net Xception initialization file.",
+            unavailable=True,
+        )
+
     mode = infer_mode(state_dict)
     original_get_xcep_state_dict = f3net_models.get_xcep_state_dict
 
@@ -195,12 +202,6 @@ def main() -> int:
 
     weights_dir = MODEL_ROOT / "weights"
     backbone_path = weights_dir / BACKBONE_NAME
-    if not backbone_path.is_file():
-        fail(
-            f"Missing the required Xception backbone at {backbone_path}.",
-            unavailable=True,
-        )
-
     checkpoint_path = resolve_detector_checkpoint(weights_dir, args.checkpoint)
     repo_root = find_repo_root(MODEL_ROOT / "repo", "models.py")
     sys.path.insert(0, str(repo_root))

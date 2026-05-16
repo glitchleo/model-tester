@@ -6,6 +6,7 @@ albumentations==2.0.8
 contexttimer==0.3.3
 efficientnet-pytorch==0.7.1
 einops==0.8.2
+fastapi==0.116.1
 ffmpeg-python==0.2.0
 filterpy==1.4.5
 fvcore==0.1.5.post20221221
@@ -17,6 +18,7 @@ opencv-transforms==0.0.6
 pandas==3.0.2
 pillow==12.1.1
 prettytable==3.17.0
+python-multipart==0.0.20
 PyTurboJPEG==2.2.0
 PyYAML==6.0.3
 retinaface-pytorch==0.0.7
@@ -31,4 +33,5 @@ termcolor==3.3.0
 timm==1.0.26
 tqdm==4.67.3
 transformers==5.8.0
+uvicorn[standard]==0.35.0
 yacs==0.1.8
