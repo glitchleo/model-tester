@@ -198,8 +198,10 @@ The FastAPI backend processes uploads immediately, which keeps the thesis demo s
 Start it locally:
 
 ```powershell
-python -m uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
+python -m uvicorn app.api:app --reload --host 0.0.0.0 --port 8000
 ```
+
+Open the built-in web UI on the PC at `http://127.0.0.1:8000/`. On another device on the same network, use the PC's IPv4 address, for example `http://192.168.1.25:8000/`.
 
 Endpoints:
 
@@ -244,13 +246,47 @@ docker compose build
 docker compose up backend
 ```
 
-Then open:
+Then open the site on the PC:
 
 ```text
-http://127.0.0.1:8000/health
+http://127.0.0.1:8000/
 ```
 
-By default the Dockerfile installs CPU PyTorch. That is enough for CPU-capable wrappers, but AltFreezing is expected to report unavailable unless you later move to a CUDA-enabled image/runtime.
+To open it from a laptop on the same Wi-Fi/LAN:
+
+```powershell
+Get-NetIPAddress -AddressFamily IPv4 |
+  Where-Object { $_.IPAddress -ne "127.0.0.1" -and $_.IPAddress -notlike "169.254*" } |
+  Select-Object InterfaceAlias, IPAddress
+```
+
+Use the PC address in the laptop browser, for example:
+
+```text
+http://192.168.1.25:8000/
+```
+
+If the laptop cannot connect, allow inbound TCP traffic for port `8000` in Windows Defender Firewall or change `MODEL_TESTER_PORT` before starting Compose:
+
+```powershell
+$env:MODEL_TESTER_PORT = "8080"
+docker compose up --build backend
+```
+
+The backend allows browser requests from other machines by default with `MODEL_TESTER_ALLOWED_ORIGINS=*`. For a known frontend origin, lock it down like this:
+
+```powershell
+$env:MODEL_TESTER_ALLOWED_ORIGINS = "http://192.168.1.40:5173,http://localhost:5173"
+docker compose up --build backend
+```
+
+By default the Dockerfile installs CPU PyTorch. That is enough for CPU-capable wrappers, but AltFreezing is expected to report unavailable without CUDA. On a Windows PC with Docker Desktop, WSL2, an NVIDIA driver, and GPU support enabled, use the GPU overlay:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build backend
+```
+
+That overlay installs the CUDA PyTorch wheel index and asks Docker to expose all GPUs to the backend container.
 
 Batch video table:
 

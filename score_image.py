@@ -491,117 +491,6 @@ def model_unavailable_reason(model_name: str, media_kind: str, args: argparse.Na
     if not spec.runner(media_kind).is_file():
         return f"missing {media_kind} runner"
 
-<<<<<<< HEAD
-    if model_name == "altfreezing":
-        checkpoint_ok = (
-            args.altfreezing_checkpoint.resolve().is_file()
-            if args.altfreezing_checkpoint
-            else any(large_file(path) for path in (ROOT / "models" / "altfreezing" / "checkpoints").glob("*.pth"))
-        )
-        aux_dir = ROOT / "auxillary"
-        aux_ok = all(
-            (aux_dir / name).is_file()
-            for name in ("mobilenet0.25_Final.pth", "mobilenet_224_model_best_gdconv_external.pth")
-        )
-        missing = []
-        if not checkpoint_ok:
-            missing.append("checkpoint in models/altfreezing/checkpoints")
-        if not aux_ok:
-            missing.append("auxiliary face weights in auxillary")
-        if not torch_cuda_available():
-            missing.append("CUDA runtime")
-        if not repo_has_marker(ROOT / "models" / "altfreezing" / "repo", "demo.py"):
-            missing.append("AltFreezing source repo")
-        return None if not missing else "missing " + ", ".join(missing)
-
-    if model_name == "effort":
-        model_root = ROOT / "models" / "effort"
-        checkpoint = (
-            args.effort_checkpoint.resolve()
-            if args.effort_checkpoint
-            else model_root / "weights" / "effort_clip_L14_trainOn_FaceForensic.pth"
-        )
-        clip_model = (
-            args.effort_clip_model.resolve()
-            if args.effort_clip_model
-            else model_root / "pretrained" / "clip-vit-large-patch14"
-        )
-        missing = []
-        if not large_file(checkpoint):
-            missing.append("EFFORT checkpoint")
-        if not (clip_model / "config.json").is_file():
-            missing.append("CLIP ViT-L/14 config")
-        if not repo_has_marker(model_root / "repo", "DeepfakeBench/training/demo.py"):
-            missing.append("EFFORT source repo")
-        return None if not missing else "missing " + ", ".join(missing)
-
-    if model_name == "f3net":
-        weights_dir = ROOT / "models" / "f3net" / "weights"
-        detector_ok = (
-            args.f3net_checkpoint.resolve().is_file()
-            if args.f3net_checkpoint
-            else any(
-                large_file(path)
-                for path in weights_dir.glob("*.pth")
-                if path.name != "xception-b5690688.pth"
-            )
-        )
-        missing = []
-        if not detector_ok:
-            missing.append("F3Net detector checkpoint")
-        if not repo_has_marker(ROOT / "models" / "f3net" / "repo", "models.py"):
-            missing.append("F3Net source repo")
-        return None if not missing else "missing " + ", ".join(missing)
-
-    if model_name == "recce":
-        model_root = ROOT / "models" / "recce"
-        checkpoint = (
-            args.recce_checkpoint.resolve()
-            if args.recce_checkpoint
-            else model_root / "weights" / "recce_best.pth"
-        )
-        checkpoint_ok = large_file(checkpoint)
-        repo_ok = repo_has_marker(model_root / "repo", "model/network/Recce.py")
-        missing = []
-        if not checkpoint_ok:
-            missing.append("RECCE checkpoint")
-        if not repo_ok:
-            missing.append("RECCE source repo")
-        return None if not missing else "missing " + ", ".join(missing)
-
-    if model_name == "selfblendedimages":
-        weight_ok = selfblended_weight_available(
-            ROOT / "models" / "selfblendedimages" / "weights",
-            args.selfblendedimages_weight,
-        )
-        repo_ok = repo_has_marker(
-            ROOT / "models" / "selfblendedimages" / "repo",
-            "src/inference/model.py",
-        )
-        missing = []
-        if not weight_ok:
-            missing.append("SelfBlendedImages FFc23 checkpoint")
-        if not repo_ok:
-            missing.append("SelfBlendedImages source repo")
-        return None if not missing else "missing " + ", ".join(missing)
-
-    if model_name == "ucf":
-        checkpoint = args.ucf_checkpoint.resolve() if args.ucf_checkpoint else ROOT / "models" / "ucf" / "ucf_best.pth"
-        checkpoint_ok = large_file(checkpoint)
-        repo_ok = repo_has_marker(ROOT / "models" / "f3net" / "repo", "xception.py")
-        missing = []
-        if not checkpoint_ok:
-            missing.append("UCF checkpoint")
-        if not repo_ok:
-            missing.append("shared Xception source")
-        return None if not missing else "missing " + ", ".join(missing)
-
-    return "unknown model"
-
-
-def model_is_available(model_name: str, media_kind: str, args: argparse.Namespace) -> bool:
-    return model_unavailable_reason(model_name, media_kind, args) is None
-=======
     checks = {
         "altfreezing": altfreezing_missing_items,
         "effort": effort_missing_items,
@@ -611,7 +500,10 @@ def model_is_available(model_name: str, media_kind: str, args: argparse.Namespac
         "ucf": ucf_missing_items,
     }
     return missing_reason(checks[model_name](args))
->>>>>>> 1868c2fedf66ff40f9c8105566fa0d7eee8299c3
+
+
+def model_is_available(model_name: str, media_kind: str, args: argparse.Namespace) -> bool:
+    return model_unavailable_reason(model_name, media_kind, args) is None
 
 
 def available_model_names(media_kind: str, args: argparse.Namespace) -> list[str]:

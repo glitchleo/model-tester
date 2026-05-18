@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -8,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
 
 from .prediction import IMAGE_SUFFIXES, ROOT, VIDEO_SUFFIXES, analyze_media, model_availability
 
@@ -20,7 +23,25 @@ app = FastAPI(
 
 UPLOAD_DIR = ROOT / "outputs" / "uploads"
 RESULT_DIR = ROOT / "outputs" / "api_results"
+WEB_INDEX = ROOT / "app" / "web" / "index.html"
 RESULTS: dict[str, dict[str, Any]] = {}
+
+
+def _csv_env(name: str, default: str) -> list[str]:
+    return [
+        item.strip()
+        for item in os.getenv(name, default).split(",")
+        if item.strip()
+    ]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_csv_env("MODEL_TESTER_ALLOWED_ORIGINS", "*"),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 
 def _now() -> str:
@@ -108,6 +129,17 @@ async def _analyze_upload(
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/", include_in_schema=False)
+def web_app():
+    if WEB_INDEX.is_file():
+        return FileResponse(WEB_INDEX)
+    return HTMLResponse(
+        "<!doctype html><title>Deepfake Model Tester</title>"
+        "<h1>Deepfake Model Tester API</h1>"
+        "<p>The API is running. Open <a href='/docs'>/docs</a> for endpoints.</p>"
+    )
 
 
 @app.get("/models")
