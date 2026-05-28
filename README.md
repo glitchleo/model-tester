@@ -145,6 +145,7 @@ python .\score_image.py .\data\samples\your_video.mp4 --json
 ```
 
 Use `--model all` only when you intentionally want to try every configured model and see which ones are missing weights or dependencies.
+AltFreezing is video-only and is not selected for image/photo inputs.
 
 For frame-based video wrappers, the default is a quick 8-frame test. Increase the frame budget when you want more coverage. AltFreezing is video-based, so it keeps its native 400-frame cap unless you pass `--altfreezing-max-frame`.
 
@@ -157,7 +158,7 @@ python .\score_image.py .\data\samples\your_video.mp4 --video-frames 48 --json
 
 Frame-based video wrappers use fixed interval sampling from the first decoded frame. For example, `--video-frames 10` on a 200-frame video checks internal frame indices `0,20,40,60,80,100,120,140,160,180`.
 
-The final report includes the models that ran, any locally unavailable models that were skipped, the combined score, video metadata, peak sampled frames, and a short explanation of what the score means.
+The final report includes the models that ran, skipped models, the combined score, video metadata, peak sampled frames, and a short explanation of what the score means.
 
 ## Standard Prediction CLI
 
@@ -201,7 +202,38 @@ Start it locally:
 python -m uvicorn app.api:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Open the built-in web UI on the PC at `http://127.0.0.1:8000/`. On another device on the same network, use the PC's IPv4 address, for example `http://192.168.1.25:8000/`.
+## React Frontend
+
+The browser UI lives in `app/web` as a Vite React app with normal CSS.
+
+For local frontend development, start the combined dev launcher:
+
+```powershell
+cd .\app\web
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:5173/`. This starts FastAPI on `http://127.0.0.1:8000` if it is not already running, waits for `/health`, then starts Vite.
+
+If you already have the backend running in another terminal and only want the frontend:
+
+```powershell
+cd .\app\web
+npm run dev:ui
+```
+
+For the backend to serve the React app directly:
+
+```powershell
+cd .\app\web
+npm install
+npm run build
+cd ..\..
+python -m uvicorn app.api:app --reload --host 0.0.0.0 --port 8000
+```
+
+Then open the built web UI on the PC at `http://127.0.0.1:8000/`. On another device on the same network, use the PC's IPv4 address, for example `http://192.168.1.25:8000/`.
 
 Endpoints:
 
@@ -239,7 +271,7 @@ Uploaded files are saved under `outputs/uploads/`, and result JSON is saved unde
 
 ## Docker Backend
 
-The first Docker target is one backend container. The build context excludes large local weights and sample media; `docker-compose.yml` mounts `models/`, `auxillary/`, `data/`, and `outputs/` at runtime so your local checkpoints are still visible inside the container.
+The first Docker target is one backend container. The image builds the React frontend first, then serves the compiled assets from FastAPI. The build context excludes large local weights and sample media; `docker-compose.yml` mounts `models/`, `auxillary/`, `data/`, and `outputs/` at runtime so your local checkpoints are still visible inside the container.
 
 ```powershell
 docker compose build
@@ -326,7 +358,6 @@ Image scoring:
 
 ```powershell
 python .\score_image.py .\data\samples\your_image.jpg --model selfblendedimages
-python .\score_image.py .\data\samples\your_image.jpg --model altfreezing
 ```
 
 F3Net image/video scoring:
@@ -409,7 +440,7 @@ Useful SelfBlendedImages controls:
 - `--video-batch-size`: face-crop inference batch size; lower this if CUDA memory is tight.
 - `--selfblendedimages-face-max-size`: cap RetinaFace detector size; lower this if CUDA memory is tight.
 
-AltFreezing is already video-based. For videos, `--video-frames` is ignored by AltFreezing so frame-based model testing can use the chosen frame count without changing AltFreezing behavior. Use `--altfreezing-max-frame` only when you intentionally want to change AltFreezing's native leading-frame cap.
+AltFreezing is already video-based and is not selected for image/photo inputs. For videos, `--video-frames` is ignored by AltFreezing so frame-based model testing can use the chosen frame count without changing AltFreezing behavior. Use `--altfreezing-max-frame` only when you intentionally want to change AltFreezing's native leading-frame cap.
 
 ## Model Layout
 

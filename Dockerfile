@@ -1,3 +1,13 @@
+FROM node:24-slim AS frontend
+
+WORKDIR /frontend
+
+COPY app/web/package*.json ./
+RUN npm ci
+
+COPY app/web/ ./
+RUN npm run build
+
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -22,6 +32,7 @@ RUN python -m pip install --upgrade pip \
     && python -m pip install -r requirements.txt
 
 COPY . .
+COPY --from=frontend /frontend/dist ./app/web/dist
 
 RUN mkdir -p outputs/uploads outputs/api_results
 

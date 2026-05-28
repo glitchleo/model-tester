@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import score_image
+
+from .preprocessing import create_preprocessed_images
 
 
 ROOT = score_image.ROOT
@@ -270,6 +273,113 @@ def analyze_media(
         "summary": summary,
         "results": standardized_results,
         "skipped_models": skipped_models,
+    }
+
+
+def analyze_image_preprocessing_pipelines(
+    media_path: str | Path,
+    *,
+    model: str | None = None,
+    include_details: bool = False,
+    **score_options: Any,
+) -> dict[str, Any]:
+    path = Path(media_path).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Input image not found: {path}")
+
+    input_type = score_image.infer_media_kind(path)
+    if input_type != "image":
+        supported = ", ".join(sorted(IMAGE_SUFFIXES))
+        raise ValueError(f"Pipeline comparison only supports images. Supported extensions: {supported}.")
+
+    selection = normalize_model_selection(model)
+    args = build_score_args(model=selection, **score_options)
+    selected_models = score_image.selected_model_names(selection, "image", args)
+    skipped_models = score_image.skipped_model_notes(selection, "image", args)
+    if not selected_models:
+        summary = {
+            "model_name": "combined",
+            "input_type": "image",
+            "fake_score": None,
+            "real_score": None,
+            "status": "no_score",
+            "processing_time": 0.0,
+            "models_scored": [],
+            "pipelines_scored": [],
+        }
+        return {
+            "analysis_type": "preprocessing_comparison",
+            "input_path": str(path),
+            "input_type": "image",
+            "model_selection": selection,
+            "summary": summary,
+            "pipelines": [],
+            "models": [],
+            "results": [],
+            "skipped_models": skipped_models,
+        }
+
+    started = time.perf_counter()
+    variant_dir = ROOT / "outputs" / "preprocessed" / uuid.uuid4().hex
+    variants = create_preprocessed_images(path, variant_dir)
+    pipelines = []
+    flattened_results = []
+
+    for variant in variants:
+        pipeline_started = time.perf_counter()
+        pipeline_results = []
+        variant_path = Path(variant["image_path"])
+
+        for model_name in selected_models:
+            model_started = time.perf_counter()
+            raw_result = score_image.run_model(model_name, "image", args, variant_path)
+            elapsed = time.perf_counter() - model_started
+            result = standardize_model_result(
+                raw_result,
+                "image",
+                elapsed,
+                include_details=include_details,
+            )
+            result["pipeline_id"] = variant["pipeline_id"]
+            result["pipeline_name"] = variant["pipeline_name"]
+            pipeline_results.append(result)
+            flattened_results.append(result)
+
+        pipeline_elapsed = time.perf_counter() - pipeline_started
+        pipelines.append(
+            {
+                **variant,
+                "summary": _combined_prediction(pipeline_results, "image", pipeline_elapsed),
+                "results": pipeline_results,
+            }
+        )
+
+    total_elapsed = time.perf_counter() - started
+    summary = _combined_prediction(flattened_results, "image", total_elapsed)
+    summary["pipelines_scored"] = [
+        pipeline["pipeline_id"]
+        for pipeline in pipelines
+        if isinstance(pipeline["summary"].get("fake_score"), (int, float))
+    ]
+    summary["pipelines_run"] = len(pipelines)
+
+    return {
+        "analysis_type": "preprocessing_comparison",
+        "input_path": str(path),
+        "input_type": "image",
+        "model_selection": selection,
+        "summary": summary,
+        "pipelines": pipelines,
+        "models": [
+            {
+                "model_id": model_name,
+                "model_name": MODEL_DISPLAY_NAMES.get(model_name, model_name),
+            }
+            for model_name in selected_models
+        ],
+        "results": flattened_results,
+        "skipped_models": skipped_models,
+        "preprocessed_dir": str(variant_dir),
     }
 
 

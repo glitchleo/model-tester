@@ -7,6 +7,8 @@ __pycache__
 .pytest_cache
 .mypy_cache
 .ipynb_checkpoints
+app/web/node_modules
+app/web/dist
 
 outputs/*
 !outputs/.gitkeep

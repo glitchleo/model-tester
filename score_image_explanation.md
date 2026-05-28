@@ -35,8 +35,11 @@ Because every model runner speaks this small output format, the main script can 
 - an image runner path
 - a video runner path
 - a default note explaining what the runner did
+- the input media types the model is allowed to run on
 
 Adding a new model means adding a new entry there, adding availability checks, and making sure the runner prints `SCORE`, `UNAVAILABLE`, and optional `DETAIL_JSON`.
+
+AltFreezing is registered as video-only, so `selected_model_names()` skips it for image/photo inputs even if its local weights are available.
 
 ## What the final score means
 

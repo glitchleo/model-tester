@@ -44,13 +44,7 @@ Direct wrapper:
 python .\models\altfreezing\run_video.py --video .\data\samples\your_video.mp4 --max-frame 400 --skip-output
 ```
 
-Image proxy:
-
-```powershell
-python .\score_image.py .\data\samples\your_image.jpg --model altfreezing
-```
-
-AltFreezing is a video model. The image wrapper duplicates the input image into a short temporary clip so you can get a proxy image score with one command.
+AltFreezing is a video model. The top-level scorer does not run it for images/photos.
 
 ## Notes
 

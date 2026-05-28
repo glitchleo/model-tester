@@ -34,6 +34,10 @@ class ModelSpec:
     video_runner: Path
     image_note: str
     video_note: str
+    supported_media: tuple[str, ...] = ("image", "video")
+
+    def supports(self, media_kind: str) -> bool:
+        return media_kind in self.supported_media
 
     def runner(self, media_kind: str) -> Path:
         return self.image_runner if media_kind == "image" else self.video_runner
@@ -50,8 +54,9 @@ MODEL_SPECS = {
             "AltFreezing",
             ROOT / "models" / "altfreezing" / "run_image.py",
             ROOT / "models" / "altfreezing" / "run_video.py",
-            "single image duplicated into a short video clip because the original model is video-based",
+            "video-only model skipped for image inputs",
             "native video model using temporal face-track clips",
+            ("video",),
         ),
         ModelSpec(
             "effort",
@@ -282,6 +287,11 @@ def format_batch_report(rows: list[dict[str, object]], model_names: list[str]) -
     return "\n".join(lines)
 
 
+def print_skipped_notes(skipped_models: list[dict[str, str]]) -> None:
+    for item in skipped_models:
+        print(f"{item['model']}: {item['note']}", file=sys.stderr)
+
+
 def score_video_batch(args: argparse.Namespace, media_path: Path) -> int:
     video_paths, base_dir = collect_video_paths(media_path, args.recursive)
     if not video_paths:
@@ -488,6 +498,9 @@ def model_unavailable_reason(model_name: str, media_kind: str, args: argparse.Na
     spec = MODEL_SPECS.get(model_name)
     if spec is None:
         return "unknown model"
+    if not spec.supports(media_kind):
+        supported = "/".join(spec.supported_media)
+        return f"{spec.label} supports {supported} inputs only"
     if not spec.runner(media_kind).is_file():
         return f"missing {media_kind} runner"
 
@@ -514,20 +527,40 @@ def available_model_names(media_kind: str, args: argparse.Namespace) -> list[str
     ]
 
 
+def supported_model_names(media_kind: str) -> list[str]:
+    return [
+        model_name
+        for model_name in MODEL_NAMES
+        if MODEL_SPECS[model_name].supports(media_kind)
+    ]
+
+
 def selected_model_names(selection: str, media_kind: str, args: argparse.Namespace) -> list[str]:
     if selection in {"available", "both"}:
         return available_model_names(media_kind, args)
     if selection == "all":
-        return MODEL_NAMES
+        return supported_model_names(media_kind)
+    if selection in MODEL_SPECS and not MODEL_SPECS[selection].supports(media_kind):
+        return []
     return [selection]
 
 
 def skipped_model_notes(selection: str, media_kind: str, args: argparse.Namespace) -> list[dict[str, str]]:
-    if selection not in {"available", "both"}:
+    if selection in {"available", "both"}:
+        candidates = MODEL_NAMES
+    elif selection == "all":
+        candidates = [
+            model_name
+            for model_name in MODEL_NAMES
+            if not MODEL_SPECS[model_name].supports(media_kind)
+        ]
+    elif selection in MODEL_SPECS and not MODEL_SPECS[selection].supports(media_kind):
+        candidates = [selection]
+    else:
         return []
 
     skipped = []
-    for model_name in MODEL_NAMES:
+    for model_name in candidates:
         reason = model_unavailable_reason(model_name, media_kind, args)
         if reason:
             skipped.append({"model": model_name, "note": reason})
@@ -951,6 +984,7 @@ def format_final_report(summary: dict[str, object]) -> str:
     if summary["final_score"] is None:
         lines = ["", "FINAL SUMMARY", "No final score: no model returned a usable score."]
         append_notes(lines, "Unavailable models:", summary.get("unavailable_models"))
+        append_notes(lines, "Models not run:", summary.get("skipped_models"))
         append_notes(lines, "Models with errors:", summary.get("error_models"))
         return "\n".join(lines)
 
@@ -992,12 +1026,27 @@ def format_final_report(summary: dict[str, object]) -> str:
                     lines.append(f"{prefix}{value}")
 
     append_notes(lines, "Unavailable models skipped:", summary.get("unavailable_models"))
-    append_notes(lines, "Models not run because they are not available locally:", summary.get("skipped_models"))
+    append_notes(lines, "Models not run:", summary.get("skipped_models"))
     append_notes(lines, "Models with errors:", summary.get("error_models"))
     return "\n".join(lines)
 
 
 def run_model(model_name: str, media_kind: str, args: argparse.Namespace, media_path: Path) -> dict[str, object]:
+    spec = MODEL_SPECS[model_name]
+    if not spec.supports(media_kind):
+        return {
+            "model": model_name,
+            "media": media_kind,
+            "command": [],
+            "returncode": None,
+            "stdout": "",
+            "stderr": "",
+            "score": None,
+            "status": "unavailable",
+            "note": model_unavailable_reason(model_name, media_kind, args) or "unsupported input type",
+            "details": None,
+        }
+
     command = build_command(model_name, media_kind, args, media_path)
     completed = subprocess.run(
         command,
@@ -1114,6 +1163,7 @@ def main() -> int:
     skipped_models = skipped_model_notes(args.model, media_kind, args)
     if not selected_models:
         print("No available models were found for this media type.", file=sys.stderr)
+        print_skipped_notes(skipped_models)
         print("Run python .\\check_setup.py to see which weights or dependencies are missing.", file=sys.stderr)
         return 1
 

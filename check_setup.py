@@ -87,7 +87,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--smoke",
         action="store_true",
-        help="After setup checks pass, run score_image.py on data/samples/1.png.",
+        help="After setup checks pass, run score_image.py on a suitable sample input.",
     )
     parser.add_argument(
         "--model",
@@ -492,10 +492,27 @@ def first_sample_image() -> Path | None:
     return None
 
 
+def first_sample_video() -> Path | None:
+    for suffix in ("*.mp4", "*.mov", "*.avi", "*.mkv", "*.webm", "*.m4v", "*.mpeg", "*.mpg"):
+        sample = next((ROOT / "data" / "samples").glob(suffix), None)
+        if sample is not None:
+            return sample
+    return None
+
+
 def run_smoke(model: str) -> int:
-    sample = first_sample_image()
-    if sample is None:
-        sample = synthetic_smoke_image()
+    if model == "altfreezing":
+        sample = first_sample_video()
+        if sample is None:
+            print(
+                "AltFreezing smoke tests require a sample video in data/samples.",
+                file=sys.stderr,
+            )
+            return 1
+    else:
+        sample = first_sample_image()
+        if sample is None:
+            sample = synthetic_smoke_image()
 
     command = [sys.executable, str(ROOT / "score_image.py"), str(sample), "--model", model]
     print()

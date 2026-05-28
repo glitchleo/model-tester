@@ -11,8 +11,16 @@ from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
-from .prediction import IMAGE_SUFFIXES, ROOT, VIDEO_SUFFIXES, analyze_media, model_availability
+from .prediction import (
+    IMAGE_SUFFIXES,
+    ROOT,
+    VIDEO_SUFFIXES,
+    analyze_image_preprocessing_pipelines,
+    analyze_media,
+    model_availability,
+)
 
 
 app = FastAPI(
@@ -23,7 +31,9 @@ app = FastAPI(
 
 UPLOAD_DIR = ROOT / "outputs" / "uploads"
 RESULT_DIR = ROOT / "outputs" / "api_results"
-WEB_INDEX = ROOT / "app" / "web" / "index.html"
+WEB_DIR = ROOT / "app" / "web"
+WEB_DIST = WEB_DIR / "dist"
+WEB_DIST_INDEX = WEB_DIST / "index.html"
 RESULTS: dict[str, dict[str, Any]] = {}
 
 
@@ -41,6 +51,12 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
+)
+
+app.mount(
+    "/assets",
+    StaticFiles(directory=WEB_DIST / "assets", check_dir=False),
+    name="web_assets",
 )
 
 
@@ -133,12 +149,15 @@ def health() -> dict[str, str]:
 
 @app.get("/", include_in_schema=False)
 def web_app():
-    if WEB_INDEX.is_file():
-        return FileResponse(WEB_INDEX)
+    if WEB_DIST_INDEX.is_file():
+        return FileResponse(WEB_DIST_INDEX)
     return HTMLResponse(
         "<!doctype html><title>Deepfake Model Tester</title>"
-        "<h1>Deepfake Model Tester API</h1>"
-        "<p>The API is running. Open <a href='/docs'>/docs</a> for endpoints.</p>"
+        "<h1>Deepfake Model Tester</h1>"
+        "<p>The API is running, but the React frontend has not been built yet.</p>"
+        "<p>Run <code>npm install</code> and <code>npm run build</code> in "
+        "<code>app/web</code>, or use <code>npm run dev</code> for local frontend development.</p>"
+        "<p>Open <a href='/docs'>/docs</a> for API endpoints.</p>"
     )
 
 
@@ -163,6 +182,30 @@ async def analyze_image(
         video_frames=None,
         video_preset="quick",
         include_details=include_details,
+    )
+
+
+@app.post("/analyze-image-pipelines")
+async def analyze_image_pipelines(
+    file: UploadFile = File(...),
+    model: str = Form("available"),
+    include_details: bool = Form(False),
+) -> dict[str, Any]:
+    upload_path = await _save_upload(file, IMAGE_SUFFIXES)
+    try:
+        analysis = analyze_image_preprocessing_pipelines(
+            upload_path,
+            model=model,
+            include_details=include_details,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _store_result(
+        upload_path=upload_path,
+        original_filename=file.filename,
+        analysis=analysis,
     )
 
 
