@@ -104,6 +104,28 @@ def torch_load_compat(torch_module, path: Path, device) -> object:
         return torch_module.load(path, map_location=device)
 
 
+def load_retinaface_model(retina_models, torch_module, cache_dir: Path, max_size: int, device):
+    model_name = "resnet50_2020-07-20"
+    model_info = retina_models.models[model_name]
+    model = model_info.model(max_size=max_size, device=device)
+    checkpoint_path = cache_dir / "hub" / "checkpoints" / Path(model_info.url).name.replace(
+        "-f168fae3c.zip",
+        ".pth",
+    )
+
+    if checkpoint_path.is_file():
+        state_dict = torch_load_compat(torch_module, checkpoint_path, "cpu")
+    else:
+        state_dict = torch_module.utils.model_zoo.load_url(
+            model_info.url,
+            progress=True,
+            map_location="cpu",
+        )
+
+    model.load_state_dict(state_dict)
+    return model
+
+
 def main() -> int:
     args = parse_args()
     image_path = args.image.resolve()
@@ -122,7 +144,7 @@ def main() -> int:
         import cv2
         import torch
         from efficientnet_pytorch import EfficientNet
-        from retinaface.pre_trained_models import get_model
+        import retinaface.pre_trained_models as retina_models
         from preprocess import extract_face
     except Exception as exc:
         fail(f"Missing SelfBlendedImages runtime dependency: {exc}")
@@ -144,8 +166,10 @@ def main() -> int:
         fail(f"Could not read image: {image_path}")
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    face_detector = get_model(
-        "resnet50_2020-07-20",
+    face_detector = load_retinaface_model(
+        retina_models,
+        torch,
+        cache_dir,
         max_size=max(frame.shape[:2]),
         device=device,
     )

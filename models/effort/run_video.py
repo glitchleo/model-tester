@@ -181,11 +181,6 @@ def main() -> int:
     except Exception as exc:
         fail(f"Missing EFFORT runtime dependency: {exc}", unavailable=True)
 
-    video_info = read_video_info(cv2, video_path)
-    sampled_frames = sample_video_frames(cv2, np, video_path, args.frames)
-    if not sampled_frames:
-        fail(f"EFFORT could not decode any frames from {video_path}.")
-
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
     model = load_model(torch, args.checkpoint.resolve(), args.clip_model.resolve(), device)
     transform = transforms.Compose(
@@ -196,14 +191,21 @@ def main() -> int:
         ]
     )
 
-    tensors = [
-        transform(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
-        for _, frame in sampled_frames
-    ]
+    video_info = read_video_info(cv2, video_path)
+    sampled_frames = sample_video_frames(cv2, np, video_path, args.frames)
+    if not sampled_frames:
+        fail(f"EFFORT could not decode any frames from {video_path}.")
+
     scores = []
     with torch.no_grad():
-        for start in range(0, len(tensors), args.batch_size):
-            batch = torch.stack(tensors[start : start + args.batch_size]).to(device)
+        for start in range(0, len(sampled_frames), args.batch_size):
+            frame_slice = sampled_frames[start : start + args.batch_size]
+            batch = torch.stack(
+                [
+                    transform(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+                    for _, frame in frame_slice
+                ]
+            ).to(device)
             predictions = model({"image": batch}, inference=True)
             scores.extend(
                 fakeness_from_prob(predictions["prob"][index : index + 1])

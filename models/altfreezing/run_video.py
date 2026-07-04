@@ -227,7 +227,7 @@ def main() -> int:
         fail(f"Input video not found: {video_path}")
 
     checkpoint_path = resolve_checkpoint_path(MODEL_ROOT / "checkpoints", args.checkpoint)
-    repo_root = find_repo_root(MODEL_ROOT / "repo", "demo.py")
+    repo_root = find_repo_root(MODEL_ROOT / "repo", "config.py")
     sys.path.insert(0, str(repo_root))
     cache_dir = MODEL_ROOT / ".torch-cache"
     cache_dir.mkdir(parents=True, exist_ok=True)

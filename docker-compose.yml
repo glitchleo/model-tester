@@ -1,17 +1,31 @@
+version: "3.8"
+
 services:
   backend:
     build:
       context: .
-      args:
-        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
-    image: model-tester-backend:latest
+      dockerfile: Dockerfile
     ports:
-      - "${MODEL_TESTER_BIND_ADDRESS:-0.0.0.0}:${MODEL_TESTER_PORT:-8000}:8000"
-    environment:
-      MODEL_TESTER_DEFAULT_MODEL: ${MODEL_TESTER_DEFAULT_MODEL:-available}
-      MODEL_TESTER_ALLOWED_ORIGINS: "${MODEL_TESTER_ALLOWED_ORIGINS:-*}"
+      - "8000:8000"
     volumes:
-      - ./models:/app/models
-      - ./auxillary:/app/auxillary
-      - ./data:/app/data
-      - ./outputs:/app/outputs
+      # We mount outputs as an anonymous volume so it's writable even if the local context (CD) is read-only
+      - backend_outputs:/app/outputs
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend_outputs:

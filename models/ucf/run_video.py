@@ -35,6 +35,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Force CPU inference instead of CUDA.",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="How many sampled frames to score at once.",
+    )
     return parser.parse_args()
 
 
@@ -158,6 +164,8 @@ def main() -> int:
     video_path = args.video.resolve()
     if not video_path.is_file():
         fail(f"Input video not found: {video_path}")
+    if args.batch_size < 1:
+        fail("--batch-size must be at least 1.")
 
     checkpoint_path = args.checkpoint.resolve()
     if not checkpoint_path.is_file():
@@ -194,19 +202,21 @@ def main() -> int:
             transforms.Lambda(lambda tensor: tensor * 2.0 - 1.0),
         ]
     )
-    batch = torch.stack(
-        [
-            transform(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
-            for _, frame in sampled_frames
-        ]
-    ).to(device)
-
+    scores = []
     with torch.no_grad():
-        logits = model(batch)
-        scores = [
-            fakeness_from_logits(torch, logits[index : index + 1])
-            for index in range(logits.size(0))
-        ]
+        for start in range(0, len(sampled_frames), args.batch_size):
+            frame_slice = sampled_frames[start : start + args.batch_size]
+            batch = torch.stack(
+                [
+                    transform(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+                    for _, frame in frame_slice
+                ]
+            ).to(device)
+            logits = model(batch)
+            scores.extend(
+                fakeness_from_logits(torch, logits[index : index + 1])
+                for index in range(logits.size(0))
+            )
 
     if not scores:
         fail(f"UCF did not produce any predictions for {video_path}.")

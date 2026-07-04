@@ -12,6 +12,7 @@ from run_image import (
     MODEL_ROOT,
     fail,
     find_repo_root,
+    load_retinaface_model,
     resolve_weight_path,
     torch_load_compat,
 )
@@ -514,7 +515,7 @@ def main() -> int:
         import numpy as np
         import torch
         from efficientnet_pytorch import EfficientNet
-        from retinaface.pre_trained_models import get_model
+        import retinaface.pre_trained_models as retina_models
         from preprocess import crop_face
     except Exception as exc:
         fail(f"Missing SelfBlendedImages runtime dependency: {exc}")
@@ -538,8 +539,10 @@ def main() -> int:
         max_size = min(source_max_size, args.face_detector_max_size)
     else:
         max_size = source_max_size
-    face_detector = get_model(
-        "resnet50_2020-07-20",
+    face_detector = load_retinaface_model(
+        retina_models,
+        torch,
+        cache_dir,
         max_size=max_size,
         device=device,
     )

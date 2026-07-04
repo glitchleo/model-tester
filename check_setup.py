@@ -233,13 +233,7 @@ def check_torch(model: str) -> list[Check]:
 
 def check_repos(model: str) -> list[Check]:
     markers = [
-        ("altfreezing", "AltFreezing repo", ROOT / "models" / "altfreezing" / "repo", "demo.py"),
-        (
-            "effort",
-            "EFFORT repo",
-            ROOT / "models" / "effort" / "repo",
-            "DeepfakeBench/training/demo.py",
-        ),
+        ("altfreezing", "AltFreezing repo", ROOT / "models" / "altfreezing" / "repo", "config.py"),
         ("f3net", "F3Net repo", ROOT / "models" / "f3net" / "repo", "models.py"),
         ("recce", "RECCE repo", ROOT / "models" / "recce" / "repo", "model/network/Recce.py"),
         ("ucf", "UCF shared Xception source", ROOT / "models" / "f3net" / "repo", "xception.py"),

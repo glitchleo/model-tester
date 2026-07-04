@@ -1,54 +1,21 @@
-# Python cache and virtual environments
-__pycache__/
-*.py[cod]
+# Environments
 .venv/
-venv/
-env/
+node_modules/
+__pycache__/
+*.pyc
 
-# IDE / notebook noise
-.ipynb_checkpoints/
+# IDEs and OS
+.vscode/
+.idea/
 .DS_Store
-Thumbs.db
 
-# Frontend dependencies and build output
-app/web/node_modules/
-app/web/dist/
+# Temporary outputs
+outputs/uploads/
+outputs/api_results/
 
-# Keep project structure, but ignore model artifacts
-models/*/.torch-cache/
-models/*/repo/**/__pycache__/
-models/*/repo/**/results/**
-models/*/*.pth
-models/*/*.pt
-models/*/*.safetensors
-
-auxillary/*.pth
-!auxillary/.gitkeep
-!auxillary/README.md
-
-models/*/weights/*
-!models/*/weights/.gitkeep
-
-models/*/checkpoints/*
-!models/*/checkpoints/.gitkeep
-
-models/*/pretrained/**
-!models/*/pretrained/
-!models/*/pretrained/.gitkeep
-
-models/*/landmarks/*
-!models/*/landmarks/.gitkeep
-
-# Keep dataset folders, but ignore dataset files
-data/datasets/*
-!data/datasets/README.md
-!data/datasets/.gitkeep
-
-data/samples/*
-!data/samples/README.md
-!data/samples/.gitkeep
-
-# Keep output folder, but ignore generated results
-outputs/*
-!outputs/README.md
-!outputs/.gitkeep
+# Large model weights (prevent accidental commits)
+*.pth
+*.safetensors
+*.dat
+*.tar
+models/effort/pretrained/clip-vit-large-patch14/*

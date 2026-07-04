@@ -18,7 +18,7 @@ IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 VIDEO_SUFFIXES = {".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm"}
 VIDEO_LIST_SUFFIXES = {".lst", ".txt"}
 MIN_WEIGHT_BYTES = 1024 * 1024
-VIDEO_PRESETS = {"quick": 8, "balanced": 32, "thorough": 96}
+VIDEO_PRESETS = {"quick": 4, "balanced": 12, "thorough": 32}
 ALTFREEZING_DEFAULT_MAX_FRAME = 400
 
 SCORE_PATTERN = re.compile(r"^SCORE:(?P<value>[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)$", re.MULTILINE)
@@ -406,7 +406,7 @@ def altfreezing_missing_items(args: argparse.Namespace) -> list[str]:
         missing.append("auxiliary face weights in auxillary")
     if not torch_cuda_available():
         missing.append("CUDA runtime")
-    if not repo_has_marker(ROOT / "models" / "altfreezing" / "repo", "demo.py"):
+    if not repo_has_marker(ROOT / "models" / "altfreezing" / "repo", "config.py"):
         missing.append("AltFreezing source repo")
     return missing
 
@@ -429,8 +429,6 @@ def effort_missing_items(args: argparse.Namespace) -> list[str]:
         missing.append("EFFORT checkpoint")
     if not (clip_model / "config.json").is_file():
         missing.append("CLIP ViT-L/14 config")
-    if not repo_has_marker(model_root / "repo", "DeepfakeBench/training/demo.py"):
-        missing.append("EFFORT source repo")
     return missing
 
 
