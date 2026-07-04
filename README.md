@@ -1,6 +1,6 @@
-# Deepfake Detection Model Tester
+# Deepfake Detection
 
-A unified workspace for testing multiple pretrained deepfake-detection models from a single command. Supports image and video inputs, a FastAPI backend, and a React web UI.
+Developed for my bachelor diploma thesis, this project is a multi-model web application designed to detect deepfakes and AI-generated media. It runs uploaded images and videos through an ensemble of six state-of-the-art AI models and combines their scores to provide a single, highly accurate verdict on whether the media is real or manipulated.
 
 **Models included:** AltFreezing · EFFORT · F3Net · RECCE · SelfBlendedImages · UCF
 
