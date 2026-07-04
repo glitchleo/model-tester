@@ -17,7 +17,7 @@ Developed for my bachelor diploma thesis, this project is a multi-model web appl
 
 ### Clone the repository
 ```powershell
-git clone https://github.com/YOUR_USERNAME/model-tester.git
+git clone https://github.com/glitchleo/model-tester.git
 cd model-tester
 ```
 
